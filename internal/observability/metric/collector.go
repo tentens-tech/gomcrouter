@@ -25,6 +25,9 @@ const (
 	UpstreamHealthyHostsTotalMetric = "upstream_healthy_hosts_total"
 	UpstreamConnectionsTotalMetric  = "upstream_connections_total"
 
+	UpstreamGetHitsTotalMetric   = "upstream_get_hits_total"
+	UpstreamGetMissesTotalMetric = "upstream_get_misses_total"
+
 	RequestDurationMetric         = "request_duration_milliseconds"
 	UpstreamRequestDurationMetric = "upstream_request_duration_milliseconds"
 
@@ -42,6 +45,9 @@ type collector struct {
 	upstreamErrorsTotalCounter *prometheus.CounterVec
 	upstreamHealthyHostsTotal  prometheus.Gauge
 	upstreamConnectionsTotal   *prometheus.GaugeVec
+
+	upstreamGetHitsCounter   *prometheus.CounterVec
+	upstreamGetMissesCounter *prometheus.CounterVec
 
 	fullRequestDurationHist     *prometheus.HistogramVec
 	upstreamRequestDurationHist *prometheus.HistogramVec
@@ -92,6 +98,22 @@ func newCollector() *collector {
 			},
 			[]string{"host"},
 		),
+		upstreamGetHitsCounter: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: Namespace,
+				Name:      UpstreamGetHitsTotalMetric,
+				Help:      "Total number of upstream get/gets responses that returned at least one VALUE",
+			},
+			[]string{"host"},
+		),
+		upstreamGetMissesCounter: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: Namespace,
+				Name:      UpstreamGetMissesTotalMetric,
+				Help:      "Total number of upstream get/gets responses that returned no VALUE (bare END)",
+			},
+			[]string{"host"},
+		),
 		fullRequestDurationHist: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Namespace: Namespace,
@@ -130,6 +152,8 @@ func newCollector() *collector {
 	prometheus.MustRegister(c.upstreamHealthyHostsTotal)
 	prometheus.MustRegister(c.upstreamConnectionsTotal)
 	prometheus.MustRegister(c.upstreamRequestsTotalCounter)
+	prometheus.MustRegister(c.upstreamGetHitsCounter)
+	prometheus.MustRegister(c.upstreamGetMissesCounter)
 	prometheus.MustRegister(c.version)
 
 	// push version metric once
@@ -149,11 +173,12 @@ func (c *collector) HandleRequestAsync(cmd int, durationNs int64) {
 	})
 }
 
-func (c *collector) HandleUpstreamRequestAsync(cmd, hostId int, durationNs int64) {
+func (c *collector) HandleUpstreamRequestAsync(cmd, hostId int, durationNs int64, hitStatus int8) {
 	c.upstreamRequestEventsRing.Push(types.UpstreamRequestEvent{
 		Cmd:        cmd,
 		DurationNs: durationNs,
 		HostId:     hostId,
+		HitStatus:  hitStatus,
 	})
 }
 
@@ -220,6 +245,13 @@ func (c *collector) processAsyncMetrics() {
 
 			c.upstreamRequestsTotalCounter.WithLabelValues(cmdString, host).Inc()
 			c.upstreamRequestDurationHist.WithLabelValues(cmdString, host).Observe(float64(ev.DurationNs) / 1e6)
+
+			switch ev.HitStatus {
+			case ascii.GetResponseHit:
+				c.upstreamGetHitsCounter.WithLabelValues(host).Inc()
+			case ascii.GetResponseMiss:
+				c.upstreamGetMissesCounter.WithLabelValues(host).Inc()
+			}
 		}
 
 		if !didWork {

@@ -1,0 +1,61 @@
+version: "3.8"
+
+services:
+  memcache1:
+    image: memcached:alpine
+    container_name: memcache1
+    ports:
+      - "11211:11211"
+    restart: unless-stopped
+
+  memcache2:
+    image: memcached:alpine
+    container_name: memcache2
+    ports:
+      - "11212:11211"
+    restart: unless-stopped
+
+  gomcrouter:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: gomcrouter
+    depends_on:
+      - memcache1
+      - memcache2
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    restart: unless-stopped
+    command: >
+      /bin/gomcrouter
+      --log-level info
+      -f /gomcrouter.yaml
+      --server-event-loops=1
+      --upstream-connections 1
+      --timeout-ms 100
+      --healthcheck-interval 10s
+    volumes:
+      - ./gomcrouter.yaml:/gomcrouter.yaml:ro
+
+  writer:
+    image: busybox:latest
+    container_name: writer
+    depends_on:
+      - gomcrouter
+    volumes:
+      - ./writer.sh:/writer.sh:ro
+    command: sh /writer.sh
+    restart: unless-stopped
+
+  metrics-watcher:
+    image: busybox:latest
+    container_name: metrics-watcher
+    depends_on:
+      - gomcrouter
+    volumes:
+      - ./metrics.sh:/metrics.sh:ro
+    command: sh /metrics.sh
+    tty: true
+    stdin_open: true
+    restart: unless-stopped

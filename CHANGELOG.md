@@ -5,6 +5,14 @@ Format follows Keep a Changelog and Semantic Versioning.
 
 ---
 
+## v1.3.3
+
+### Added
+- Per-host `gomcrouter_upstream_get_hits_total` and `gomcrouter_upstream_get_misses_total` counters for `get`/`gets` responses
+- `ascii.ClassifyGetResponse` classifier (hit / miss / unknown) and `UpstreamRequestEvent.HitStatus` field to carry the result through the async metrics ring
+
+---
+
 ## v1.3.2
 
 ### Added
