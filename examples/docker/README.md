@@ -6,7 +6,7 @@ that highlights counters as they change.
 
 ## How it works
 
-```
+```text
                     ┌────────────────────────────────────────────────┐
                     │                docker network                  │
                     │                                                │
@@ -112,7 +112,7 @@ docker compose down -v
 
 ## Example metrics-watcher output
 
-```
+```text
 === gomcrouter metrics @ 12:03:47 ===
 
   gomcrouter_version{version="dev"} 1
