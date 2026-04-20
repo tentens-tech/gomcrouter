@@ -1,0 +1,19 @@
+orderedPool:
+  - memcache1:11211
+  - memcache2:11211
+
+route:
+  type: OperationSelectorRoute
+  operationPolicies:
+    add: AllFastestRoute
+    append: AllFastestRoute
+    decr: AllFastestRoute
+    delete: AllFastestRoute
+    get: MissFailoverRoute
+    gets: MissFailoverRoute
+    incr: AllFastestRoute
+    prepend: AllFastestRoute
+    replace: AllFastestRoute
+    set: AllFastestRoute
+    version: LocalRoute
+    quit: LocalRoute

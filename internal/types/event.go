@@ -9,4 +9,5 @@ type UpstreamRequestEvent struct {
 	Cmd        int
 	HostId     int
 	DurationNs int64
+	HitStatus  int8
 }

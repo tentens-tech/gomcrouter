@@ -249,10 +249,16 @@ func (p *PollGroup) onReadable(s *socket.Socket) {
 		copy(respByteBuf.B, b[offset:offset+n])
 		offset += n
 
+		hitStatus := ascii.GetResponseUnknown
+		if inflightReq.Request.Cmd == ascii.GetCmd || inflightReq.Request.Cmd == ascii.GetsCmd {
+			hitStatus = ascii.ClassifyGetResponse(respByteBuf.B)
+		}
+
 		metric.Collector.HandleUpstreamRequestAsync(
 			inflightReq.Request.Cmd,
 			p.hostId,
 			now-inflightReq.Ts,
+			hitStatus,
 		)
 		inflightReq.Request.Callback(respByteBuf, err)
 	}

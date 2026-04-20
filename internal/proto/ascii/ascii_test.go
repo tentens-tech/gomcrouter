@@ -226,6 +226,58 @@ func TestDecodeValueLen(t *testing.T) {
 	}
 }
 
+func TestClassifyGetResponse(t *testing.T) {
+	cases := []struct {
+		name string
+		resp []byte
+		want int8
+	}{
+		{
+			name: "miss",
+			resp: []byte("END\r\n"),
+			want: GetResponseMiss,
+		},
+		{
+			name: "single hit",
+			resp: []byte("VALUE foo 0 3\r\nbar\r\nEND\r\n"),
+			want: GetResponseHit,
+		},
+		{
+			name: "multi hit",
+			resp: []byte("VALUE foo 0 3\r\nbar\r\nVALUE baz 0 4\r\nquux\r\nEND\r\n"),
+			want: GetResponseHit,
+		},
+		{
+			name: "server error ignored",
+			resp: []byte("SERVER_ERROR out of memory\r\n"),
+			want: GetResponseUnknown,
+		},
+		{
+			name: "client error ignored",
+			resp: []byte("CLIENT_ERROR bad command\r\n"),
+			want: GetResponseUnknown,
+		},
+		{
+			name: "bare error ignored",
+			resp: []byte("ERROR\r\n"),
+			want: GetResponseUnknown,
+		},
+		{
+			name: "empty ignored",
+			resp: []byte{},
+			want: GetResponseUnknown,
+		},
+	}
+
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			got := ClassifyGetResponse(c.resp)
+			assert.Equal(t, c.want, got)
+		})
+	}
+}
+
 func Test_DecodeResponse(t *testing.T) {
 	type tc struct {
 		name  string

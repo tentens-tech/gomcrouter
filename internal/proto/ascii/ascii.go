@@ -201,6 +201,27 @@ func DecodeRequest(buf []byte) ([]byte, int, int, error) {
 	return buf[:total], cmd, total, nil
 }
 
+const (
+	GetResponseUnknown int8 = iota
+	GetResponseHit
+	GetResponseMiss
+)
+
+// ClassifyGetResponse classifies a decoded get/gets upstream response.
+// Returns GetResponseHit if the response carries at least one VALUE line,
+// GetResponseMiss for a bare END terminator, and GetResponseUnknown for
+// anything else (protocol errors, SERVER_ERROR/CLIENT_ERROR, etc.) so
+// those cases are not counted as either hit or miss.
+func ClassifyGetResponse(resp []byte) int8 {
+	if bytes.HasPrefix(resp, ValueMarker) {
+		return GetResponseHit
+	}
+	if bytes.Equal(resp, EndResponse) {
+		return GetResponseMiss
+	}
+	return GetResponseUnknown
+}
+
 func UpstreamRequestFailed(resp []byte) bool {
 	idx := fastIndexCRLF(resp)
 	if idx == -1 {

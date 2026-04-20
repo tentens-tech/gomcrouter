@@ -1,4 +1,6 @@
 # CODEOWNERS file for tentens-tech/gomcrouter
 # Specify GitHub usernames or teams responsible for code in this repository.
 
-* @artem-tsegelnyk
+* @slucheninov
+* @yuriizheliezko
+*.go @artem-tsegelnyk

@@ -1,0 +1,269 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Dockerfile'
+      - '.golangci.yml'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Dockerfile'
+      - '.golangci.yml'
+      - '.github/workflows/ci.yml'
+
+env:
+  GO_VERSION: '1.25'
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+          only-new-issues: true
+          problem-matchers: true
+
+      - name: Generate lint report summary
+        if: always()
+        run: |
+          echo "## 🔍 Lint Results" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Lint check completed - see annotations in Files Changed tab" >> $GITHUB_STEP_SUMMARY
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Install gotestsum
+        run: go install gotest.tools/gotestsum@latest
+
+      - name: Run tests with JUnit output
+        run: |
+          gotestsum --junitfile junit.xml --format testdox -- \
+            -race -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Generate test summary
+        if: always()
+        run: |
+          echo "## 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
+          if [ -f junit.xml ]; then
+            TESTS=$(grep -o 'tests="[0-9]*"' junit.xml | head -1 | grep -o '[0-9]*')
+            FAILURES=$(grep -o 'failures="[0-9]*"' junit.xml | head -1 | grep -o '[0-9]*')
+            ERRORS=$(grep -o 'errors="[0-9]*"' junit.xml | head -1 | grep -o '[0-9]*')
+            TIME=$(grep -o 'time="[0-9.]*"' junit.xml | head -1 | grep -o '[0-9.]*')
+            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
+            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+            echo "| Total Tests | ${TESTS:-0} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Passed | $((${TESTS:-0} - ${FAILURES:-0} - ${ERRORS:-0})) |" >> $GITHUB_STEP_SUMMARY
+            echo "| Failed | ${FAILURES:-0} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Errors | ${ERRORS:-0} |" >> $GITHUB_STEP_SUMMARY
+            echo "| Duration | ${TIME:-0}s |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Generate coverage summary
+        if: always()
+        run: |
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 📊 Coverage Report" >> $GITHUB_STEP_SUMMARY
+          if [ -f coverage.out ]; then
+            COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}')
+            echo "**Total Coverage: ${COVERAGE}**" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "<details><summary>Coverage by package</summary>" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            go tool cover -func=coverage.out | head -30 >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            echo "</details>" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-results
+          path: |
+            junit.xml
+            coverage.out
+          retention-days: 30
+
+      - name: Test Report
+        uses: dorny/test-reporter@v2
+        if: always()
+        with:
+          name: Go Tests
+          path: junit.xml
+          reporter: java-junit
+          fail-on-error: false
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.out
+          fail_ci_if_error: false
+          verbose: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Get version info
+        id: version
+        run: |
+          VERSION="dev-$(git rev-parse --short HEAD)"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build binary
+        run: |
+          go build -ldflags "-X github.com/tentens-tech/gomcrouter/version.Version=${{ steps.version.outputs.version }}" \
+            -o bin/gomcrouter .
+
+      - name: Verify binary
+        run: |
+          ls -la bin/
+          ./bin/gomcrouter --help || true
+
+      - name: Generate build summary
+        run: |
+          echo "## 🔨 Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Binary Size | $(du -h bin/gomcrouter | cut -f1) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Go Version | ${{ env.GO_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: gomcrouter-binary-linux-amd64
+          path: bin/gomcrouter
+          retention-days: 7
+
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build Docker image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: false
+          tags: gomcrouter:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+          format: 'table'
+
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+      - name: Run gosec security scanner
+        run: |
+          gosec -no-fail -fmt text ./...
+          gosec -no-fail -fmt sarif -out results.sarif ./...
+
+      - name: Generate security summary
+        if: always()
+        run: |
+          echo "## 🔒 Security Scan Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Trivy (Vulnerability Scanner)" >> $GITHUB_STEP_SUMMARY
+          echo "Scanned for CRITICAL and HIGH severity vulnerabilities." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Gosec (Go Security Checker)" >> $GITHUB_STEP_SUMMARY
+          if [ -f results.sarif ]; then
+            ISSUES=$(jq '.runs[0].results | length' results.sarif 2>/dev/null || echo "0")
+            if [ "$ISSUES" -gt 0 ]; then
+              echo "⚠️ Found ${ISSUES} potential security issue(s)" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "✅ No security issues found" >> $GITHUB_STEP_SUMMARY
+            fi
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "_Results uploaded to GitHub Security tab (if enabled)_" >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload SARIF file
+        uses: github/codeql-action/upload-sarif@v4
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        with:
+          sarif_file: results.sarif
