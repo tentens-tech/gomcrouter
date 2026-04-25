@@ -31,7 +31,15 @@ const (
 	RequestDurationMetric         = "request_duration_milliseconds"
 	UpstreamRequestDurationMetric = "upstream_request_duration_milliseconds"
 
+	MetricsEventsDroppedTotalMetric = "metrics_events_dropped_total"
+
 	VersionMetric = "version"
+)
+
+// Event-type label values for MetricsEventsDroppedTotalMetric.
+const (
+	EventTypeRequest         = "request"
+	EventTypeUpstreamRequest = "upstream_request"
 )
 
 var MilliBuckets = []float64{.1, .2, .3, .5, 1, 2, 3, 4, 5, 6, 7, 10, 25, 30, 50, 100, 150, 200, 250, 300, 400, 500, 700, 1000, 2000, 3000, 5000}
@@ -51,6 +59,12 @@ type collector struct {
 
 	fullRequestDurationHist     *prometheus.HistogramVec
 	upstreamRequestDurationHist *prometheus.HistogramVec
+
+	metricsEventsDroppedCounter *prometheus.CounterVec
+	// Pre-resolved children to avoid label-map lookups (and the variadic
+	// allocation that `WithLabelValues` performs) on the producer hot path.
+	requestEventsDropped         prometheus.Counter
+	upstreamRequestEventsDropped prometheus.Counter
 
 	version *prometheus.GaugeVec
 
@@ -132,6 +146,14 @@ func newCollector() *collector {
 			},
 			[]string{"cmd", "host"},
 		),
+		metricsEventsDroppedCounter: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Namespace: Namespace,
+				Name:      MetricsEventsDroppedTotalMetric,
+				Help:      "Total number of metric events dropped because the async event ring was full",
+			},
+			[]string{"event_type"},
+		),
 		version: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Namespace: Namespace,
@@ -141,6 +163,9 @@ func newCollector() *collector {
 			[]string{"version"},
 		),
 	}
+
+	c.requestEventsDropped = c.metricsEventsDroppedCounter.WithLabelValues(EventTypeRequest)
+	c.upstreamRequestEventsDropped = c.metricsEventsDroppedCounter.WithLabelValues(EventTypeUpstreamRequest)
 
 	c.requestEventsRing = ring.NewSPSC[types.RequestEvent](RingSize)
 	c.upstreamRequestEventsRing = ring.NewSPSC[types.UpstreamRequestEvent](RingSize)
@@ -154,6 +179,7 @@ func newCollector() *collector {
 	prometheus.MustRegister(c.upstreamRequestsTotalCounter)
 	prometheus.MustRegister(c.upstreamGetHitsCounter)
 	prometheus.MustRegister(c.upstreamGetMissesCounter)
+	prometheus.MustRegister(c.metricsEventsDroppedCounter)
 	prometheus.MustRegister(c.version)
 
 	// push version metric once
@@ -167,6 +193,10 @@ func (c *collector) Serve() {
 }
 
 func (c *collector) HandleRequestAsync(cmd int, durationNs int64) {
+	if !c.requestEventsRing.CanPush() {
+		c.requestEventsDropped.Inc()
+		return
+	}
 	c.requestEventsRing.Push(types.RequestEvent{
 		Cmd:        cmd,
 		DurationNs: durationNs,
@@ -174,6 +204,10 @@ func (c *collector) HandleRequestAsync(cmd int, durationNs int64) {
 }
 
 func (c *collector) HandleUpstreamRequestAsync(cmd, hostId int, durationNs int64, hitStatus int8) {
+	if !c.upstreamRequestEventsRing.CanPush() {
+		c.upstreamRequestEventsDropped.Inc()
+		return
+	}
 	c.upstreamRequestEventsRing.Push(types.UpstreamRequestEvent{
 		Cmd:        cmd,
 		DurationNs: durationNs,

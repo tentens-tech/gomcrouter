@@ -15,14 +15,20 @@ Format follows Keep a Changelog and Semantic Versioning.
 - Status badges in `README.md` (CI, release, license, Go version, Go report card)
 - `upstream.AsyncDoer` interface and `handlers.Pool` interface so router handlers can be unit-tested in isolation from the gnet/netpoll-backed `*Host`
 - Unit tests covering all routing handlers (`DefRouteHandler`, `AllFastestRouteHandler`, `MissFailoverRouteHandler`, `LocalRouteHandler`, `OperationSelectorRouteHandler`) plus the `NewByPolicy` factory — 100% statement coverage of `internal/router/handlers`
+- `examples/docker/test.sh` — host-side end-to-end test for the docker-compose example. Verifies that SET fans out to both memcaches, that stopping/restarting one memcache preserves writes and reads through the surviving node, and that the router converges back to two healthy hosts after recovery
+- `gomcrouter_metrics_events_dropped_total{event_type=...}` counter — increments when the async metrics ring is full and an event would otherwise overwrite an unconsumed slot. Lets operators detect when the metrics consumer cannot keep up
 
 ### Fixed
 - Build instructions in `CONTRIBUTING.md` now use the correct entry point (`go build .`)
 - `machinery/pool.bufferPool.Put` no longer mutates the slice header of buffers whose capacity does not match a pooled size class. Previously the static error responses in `proto/ascii` (e.g. `VersionBuf`, `ErrProxyErrorResponseBuf`) were being silently extended to their underlying allocation capacity on first use, causing trailing uninitialized bytes to be appended to subsequent client responses
+- `observability/metric.Collector` no longer overruns the async event ring when the consumer falls behind. `HandleRequestAsync` / `HandleUpstreamRequestAsync` check `SPSC.CanPush` before writing and increment the new dropped-events counter on overflow instead of silently overwriting an unread slot
+
+### Changed
+- Removed the obsolete `version: "3.8"` attribute from `examples/docker/docker-compose.yml` (Compose v2+ ignores it and warns on each invocation)
 
 ---
 
-## v1.3.3
+## v1.3.3 — 2026-04-20
 
 ### Added
 - Per-host `gomcrouter_upstream_get_hits_total` and `gomcrouter_upstream_get_misses_total` counters for `get`/`gets` responses
@@ -30,7 +36,7 @@ Format follows Keep a Changelog and Semantic Versioning.
 
 ---
 
-## v1.3.2
+## v1.3.2 — 2026-02-20
 
 ### Added
 - Event-loop based proxy core
