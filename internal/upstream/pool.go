@@ -1,12 +1,14 @@
 package upstream
 
 import (
+	"sync"
+	"sync/atomic"
+
 	"github.com/pkg/errors"
 	"github.com/tentens-tech/gomcrouter/internal/config"
 	"github.com/tentens-tech/gomcrouter/internal/observability/metric"
 	"github.com/tentens-tech/gomcrouter/internal/types"
 	"github.com/tentens-tech/gomcrouter/internal/upstream/io"
-	"sync"
 )
 
 // AsyncDoer is the contract upstream hosts expose to request handlers.
@@ -20,8 +22,12 @@ type OrderedPool struct {
 	ctx *config.AppContext
 	mu  sync.Mutex
 
-	healthyHosts     []*OrderedHost
-	healthyHostsView []AsyncDoer
+	healthyHosts []*OrderedHost
+	// healthyHostsView is published lock-free and read by All() on the
+	// request hot path. Writes happen only under o.mu, from refreshView.
+	// Using atomic.Pointer makes the slice-header publication race-free
+	// (a slice header is three words; a plain assignment is not atomic).
+	healthyHostsView atomic.Pointer[[]AsyncDoer]
 	unhealthyHosts   []*OrderedHost
 }
 
@@ -110,21 +116,25 @@ func (o *OrderedPool) onHostHealthy(hid int) {
 }
 
 func (o *OrderedPool) All() []AsyncDoer {
-	return o.healthyHostsView
+	p := o.healthyHostsView.Load()
+	if p == nil {
+		return nil
+	}
+	return *p
 }
 
 // refreshView rebuilds the AsyncDoer snapshot from healthyHosts.
 // Caller must hold o.mu (or be a single-threaded constructor).
 func (o *OrderedPool) refreshView() {
 	if len(o.healthyHosts) == 0 {
-		o.healthyHostsView = nil
+		o.healthyHostsView.Store(nil)
 		return
 	}
 	view := make([]AsyncDoer, len(o.healthyHosts))
 	for i, h := range o.healthyHosts {
 		view[i] = h
 	}
-	o.healthyHostsView = view
+	o.healthyHostsView.Store(&view)
 }
 
 func (o *OrderedPool) scrapeNumHealthyHostsMetric() {

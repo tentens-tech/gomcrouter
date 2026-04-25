@@ -13,7 +13,7 @@ Format follows Keep a Changelog and Semantic Versioning.
 - GitHub issue templates (bug report, feature request) and pull request template
 - `dependabot.yml` for weekly Go module, GitHub Actions, and Docker base image updates
 - Status badges in `README.md` (CI, release, license, Go version, Go report card)
-- `upstream.AsyncDoer` interface and `handlers.Pool` interface so router handlers can be unit-tested in isolation from the gnet/netpoll-backed `*Host`
+- `upstream.AsyncDoer` interface and `handlers.Pool` interface so router handlers can be unit-tested in isolation from the gnet/netpoll-backed `*Host`. The cached `OrderedPool.healthyHostsView` is published via `atomic.Pointer[[]AsyncDoer]` so request handlers can read it lock-free on the hot path while writers (health-check transitions) update it under the existing mutex — no slice-header data race
 - Unit tests covering all routing handlers (`DefRouteHandler`, `AllFastestRouteHandler`, `MissFailoverRouteHandler`, `LocalRouteHandler`, `OperationSelectorRouteHandler`) plus the `NewByPolicy` factory — 100% statement coverage of `internal/router/handlers`
 - `examples/docker/test.sh` — host-side end-to-end test for the docker-compose example. Verifies that SET fans out to both memcaches, that stopping/restarting one memcache preserves writes and reads through the surviving node, and that the router converges back to two healthy hosts after recovery
 - `gomcrouter_metrics_events_dropped_total{event_type=...}` counter — increments when the async metrics ring is full and an event would otherwise overwrite an unconsumed slot. Lets operators detect when the metrics consumer cannot keep up

@@ -16,7 +16,7 @@
 #   ./test.sh
 set -u -o pipefail
 
-cd "$(dirname "$0")"
+cd "$(dirname "$0")" || exit 1
 
 # --- Configuration --------------------------------------------------------
 
