@@ -1,0 +1,68 @@
+name: Feature request
+description: Suggest a new capability for gomcrouter
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before opening a feature request, please check `CONTRIBUTING.md` for
+        the project's philosophy and contribution tracks (protocol, routing).
+
+  - type: textarea
+    id: usecase
+    attributes:
+      label: Use case
+      description: What problem are you trying to solve? What workload or scenario motivates this?
+    validations:
+      required: true
+
+  - type: textarea
+    id: behavior
+    attributes:
+      label: Expected behavior
+      description: Describe the proposed feature and how it should behave.
+    validations:
+      required: true
+
+  - type: textarea
+    id: workload
+    attributes:
+      label: Workload / traffic pattern
+      description: |
+        RPS, read/write mix, key/value sizes, number of upstream hosts, etc.
+        This helps us evaluate the performance impact.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      multiple: true
+      options:
+        - Protocol (ASCII / Binary / Meta)
+        - Routing strategy
+        - Upstream pool / health checks
+        - IO engine / netpoll
+        - Configuration
+        - Metrics / observability
+        - CLI / runtime flags
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Workarounds you tried, related tools, or designs you ruled out.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
+        - label: I understand large changes require a design discussion before implementation (`CONTRIBUTING.md`).
+          required: true

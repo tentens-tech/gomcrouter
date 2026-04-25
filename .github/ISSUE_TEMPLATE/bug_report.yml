@@ -1,0 +1,100 @@
+name: Bug report
+description: Report a defect in gomcrouter
+title: "[bug] "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. Please fill in the
+        sections below — accurate context is what allows us to reproduce and
+        fix issues quickly.
+
+  - type: input
+    id: version
+    attributes:
+      label: gomcrouter version / commit
+      description: Output of `gomcrouter --version` or the commit hash you built from.
+      placeholder: "v1.3.3 or 2d1955b"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: How did you install gomcrouter?
+      options:
+        - Built from source
+        - Released binary
+        - Docker image
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the defect and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to trigger the issue.
+      placeholder: |
+        1. Start gomcrouter with config X
+        2. Send request Y
+        3. Observe Z
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Router config (`router.yaml`)
+      description: Paste the relevant parts of your config. Redact secrets.
+      render: yaml
+    validations:
+      required: true
+
+  - type: textarea
+    id: cli
+    attributes:
+      label: CLI flags / launch command
+      description: How was gomcrouter started? Include all relevant flags.
+      render: shell
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant log output. Use `--log-level debug` if possible.
+      render: text
+
+  - type: textarea
+    id: traffic
+    attributes:
+      label: Traffic pattern
+      description: |
+        Approximate RPS, read/write mix, key sizes, value sizes, number of
+        clients, pipelining, etc. Anything that helps us reproduce the load.
+
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: OS, kernel, architecture, container runtime if any.
+      placeholder: "Ubuntu 24.04, kernel 6.8, amd64, Docker 27.0"
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmation
+      options:
+        - label: I have searched existing issues and this is not a duplicate.
+          required: true
+        - label: I have read the project's `CONTRIBUTING.md`.
+          required: true

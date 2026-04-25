@@ -5,6 +5,20 @@ Format follows Keep a Changelog and Semantic Versioning.
 
 ---
 
+## Unreleased
+
+### Added
+- `SECURITY.md` with private vulnerability disclosure policy
+- `CODE_OF_CONDUCT.md` adopting Contributor Covenant 2.1
+- GitHub issue templates (bug report, feature request) and pull request template
+- `dependabot.yml` for weekly Go module, GitHub Actions, and Docker base image updates
+- Status badges in `README.md` (CI, release, license, Go version, Go report card)
+
+### Fixed
+- Build instructions in `CONTRIBUTING.md` now use the correct entry point (`go build .`)
+
+---
+
 ## v1.3.3
 
 ### Added

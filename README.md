@@ -1,5 +1,11 @@
 # 🧭 gomcrouter
 
+[![CI](https://github.com/tentens-tech/gomcrouter/actions/workflows/ci.yml/badge.svg)](https://github.com/tentens-tech/gomcrouter/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/tentens-tech/gomcrouter?sort=semver)](https://github.com/tentens-tech/gomcrouter/releases)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/tentens-tech/gomcrouter)](go.mod)
+[![Go Report Card](https://goreportcard.com/badge/github.com/tentens-tech/gomcrouter)](https://goreportcard.com/report/github.com/tentens-tech/gomcrouter)
+
 gomcrouter is a high performance memcache request router written in Go.  
 It accepts memcache protocol traffic, routes operations using configurable policies, and forwards requests to upstream memcached nodes using an event driven upstream engine.
 
