@@ -97,7 +97,7 @@ Requirements:
 Build:
 
 ```bash
-go build ./cmd/gomcrouter
+go build -o gomcrouter .
 ```
 
 Run tests:
