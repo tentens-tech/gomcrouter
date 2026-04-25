@@ -13,9 +13,12 @@ Format follows Keep a Changelog and Semantic Versioning.
 - GitHub issue templates (bug report, feature request) and pull request template
 - `dependabot.yml` for weekly Go module, GitHub Actions, and Docker base image updates
 - Status badges in `README.md` (CI, release, license, Go version, Go report card)
+- `upstream.AsyncDoer` interface and `handlers.Pool` interface so router handlers can be unit-tested in isolation from the gnet/netpoll-backed `*Host`
+- Unit tests covering all routing handlers (`DefRouteHandler`, `AllFastestRouteHandler`, `MissFailoverRouteHandler`, `LocalRouteHandler`, `OperationSelectorRouteHandler`) plus the `NewByPolicy` factory — 100% statement coverage of `internal/router/handlers`
 
 ### Fixed
 - Build instructions in `CONTRIBUTING.md` now use the correct entry point (`go build .`)
+- `machinery/pool.bufferPool.Put` no longer mutates the slice header of buffers whose capacity does not match a pooled size class. Previously the static error responses in `proto/ascii` (e.g. `VersionBuf`, `ErrProxyErrorResponseBuf`) were being silently extended to their underlying allocation capacity on first use, causing trailing uninitialized bytes to be appended to subsequent client responses
 
 ---
 

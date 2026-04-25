@@ -6,10 +6,9 @@ import (
 	"github.com/tentens-tech/gomcrouter/internal/proto/ascii"
 	"github.com/tentens-tech/gomcrouter/internal/server/respond"
 	"github.com/tentens-tech/gomcrouter/internal/types"
-	"github.com/tentens-tech/gomcrouter/internal/upstream"
 )
 
-func NewDefRouteHandler(pool *upstream.OrderedPool, ctx *config.AppContext) *DefRouteHandler {
+func NewDefRouteHandler(pool Pool, ctx *config.AppContext) *DefRouteHandler {
 	return &DefRouteHandler{
 		ctx:  ctx,
 		pool: pool,
@@ -17,7 +16,7 @@ func NewDefRouteHandler(pool *upstream.OrderedPool, ctx *config.AppContext) *Def
 }
 
 type DefRouteHandler struct {
-	pool *upstream.OrderedPool
+	pool Pool
 	ctx  *config.AppContext
 }
 

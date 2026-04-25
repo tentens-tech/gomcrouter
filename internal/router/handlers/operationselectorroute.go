@@ -4,11 +4,10 @@ import (
 	"github.com/tentens-tech/gomcrouter/internal/config"
 	"github.com/tentens-tech/gomcrouter/internal/proto/ascii"
 	"github.com/tentens-tech/gomcrouter/internal/types"
-	"github.com/tentens-tech/gomcrouter/internal/upstream"
 )
 
 func NewOperationSelectorRouteHandler(
-	pool *upstream.OrderedPool,
+	pool Pool,
 	opCfg map[string]config.Policy,
 	ctx *config.AppContext,
 ) *OperationSelectorRouteHandler {
@@ -32,7 +31,7 @@ func NewOperationSelectorRouteHandler(
 }
 
 type OperationSelectorRouteHandler struct {
-	pool *upstream.OrderedPool
+	pool Pool
 
 	// handlers represent mapping of cmd -> Handler. handlers always equals length of ascii.Commands.
 	// if handler for e.g. set command was declared in configuration, it will be placed on handlers[ascii.SetCmd]

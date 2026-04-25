@@ -4,16 +4,25 @@ import (
 	"github.com/pkg/errors"
 	"github.com/tentens-tech/gomcrouter/internal/config"
 	"github.com/tentens-tech/gomcrouter/internal/observability/metric"
+	"github.com/tentens-tech/gomcrouter/internal/types"
 	"github.com/tentens-tech/gomcrouter/internal/upstream/io"
 	"sync"
 )
+
+// AsyncDoer is the contract upstream hosts expose to request handlers.
+// Defining it as an interface allows handlers to be tested in isolation
+// from the real gnet/netpoll-backed *Host.
+type AsyncDoer interface {
+	AsyncDo(req *types.Request, triggerWakeup bool)
+}
 
 type OrderedPool struct {
 	ctx *config.AppContext
 	mu  sync.Mutex
 
-	healthyHosts   []*OrderedHost
-	unhealthyHosts []*OrderedHost
+	healthyHosts     []*OrderedHost
+	healthyHostsView []AsyncDoer
+	unhealthyHosts   []*OrderedHost
 }
 
 type OrderedHost struct {
@@ -39,6 +48,8 @@ func NewOrderedPool(ctx *config.AppContext, cfg config.OrderedPoolConfig, eng *i
 		}
 	}
 
+	op.refreshView()
+
 	metric.Collector.RegisterScraper(op.scrapeNumHealthyHostsMetric)
 	return &op
 }
@@ -61,6 +72,8 @@ func (o *OrderedPool) onHostUnhealthy(hid int) {
 	h := o.healthyHosts[idx]
 	o.healthyHosts = append(o.healthyHosts[:idx], o.healthyHosts[idx+1:]...)
 	o.unhealthyHosts = append(o.unhealthyHosts, h)
+
+	o.refreshView()
 
 	o.ctx.Logger.Warnf("host %s went unhealthy", h.hostname)
 }
@@ -91,11 +104,27 @@ func (o *OrderedPool) onHostHealthy(hid int) {
 	copy(o.healthyHosts[i+1:], o.healthyHosts[i:])
 	o.healthyHosts[i] = h
 
+	o.refreshView()
+
 	o.ctx.Logger.Infof("host %s went healthy", h.hostname)
 }
 
-func (o *OrderedPool) All() []*OrderedHost {
-	return o.healthyHosts
+func (o *OrderedPool) All() []AsyncDoer {
+	return o.healthyHostsView
+}
+
+// refreshView rebuilds the AsyncDoer snapshot from healthyHosts.
+// Caller must hold o.mu (or be a single-threaded constructor).
+func (o *OrderedPool) refreshView() {
+	if len(o.healthyHosts) == 0 {
+		o.healthyHostsView = nil
+		return
+	}
+	view := make([]AsyncDoer, len(o.healthyHosts))
+	for i, h := range o.healthyHosts {
+		view[i] = h
+	}
+	o.healthyHostsView = view
 }
 
 func (o *OrderedPool) scrapeNumHealthyHostsMetric() {
