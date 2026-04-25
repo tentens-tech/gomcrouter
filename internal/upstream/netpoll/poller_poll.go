@@ -38,6 +38,7 @@ func NewPoller() (*Poller, error) {
 		nextSleepMsec: -1,
 		eventFD:       efd,
 		pfds: []unix.PollFd{{
+			// #nosec G115 -- POSIX file descriptors are bounded by RLIMIT_NOFILE and always fit in int32; kernel pollfd ABI takes int32 directly.
 			Fd:     int32(efd.r),
 			Events: unix.POLLIN,
 		}},
@@ -59,6 +60,7 @@ func (p *Poller) Close() {
 
 func (p *Poller) Register(sock *socket.Socket, onR, onW, onE func(sock *socket.Socket)) {
 	pfd := unix.PollFd{
+		// #nosec G115 -- POSIX file descriptors fit in int32; kernel pollfd ABI takes int32.
 		Fd:     int32(sock.FD()),
 		Events: ReadEvents,
 	}
@@ -73,6 +75,7 @@ func (p *Poller) Register(sock *socket.Socket, onR, onW, onE func(sock *socket.S
 
 func (p *Poller) Mod(sock *socket.Socket) (err error) {
 	for i := 1; i < len(p.pfds); i++ {
+		// #nosec G115 -- POSIX file descriptors fit in int32; kernel pollfd ABI takes int32.
 		if p.pfds[i].Fd != int32(sock.FD()) {
 			continue
 		}
@@ -91,6 +94,7 @@ func (p *Poller) Mod(sock *socket.Socket) (err error) {
 
 func (p *Poller) Delete(fd int) {
 	for i := 1; i < len(p.pfds); i++ {
+		// #nosec G115 -- POSIX file descriptors fit in int32; kernel pollfd ABI takes int32.
 		if p.pfds[i].Fd != int32(fd) {
 			continue
 		}

@@ -22,6 +22,8 @@ Format follows Keep a Changelog and Semantic Versioning.
 - Build instructions in `CONTRIBUTING.md` now use the correct entry point (`go build .`)
 - `machinery/pool.bufferPool.Put` no longer mutates the slice header of buffers whose capacity does not match a pooled size class. Previously the static error responses in `proto/ascii` (e.g. `VersionBuf`, `ErrProxyErrorResponseBuf`) were being silently extended to their underlying allocation capacity on first use, causing trailing uninitialized bytes to be appended to subsequent client responses
 - `observability/metric.Collector` no longer overruns the async event ring when the consumer falls behind. `HandleRequestAsync` / `HandleUpstreamRequestAsync` check `SPSC.CanPush` before writing and increment the new dropped-events counter on overflow instead of silently overwriting an unread slot
+- Metrics HTTP server now sets `ReadHeaderTimeout` (5s), `WriteTimeout` (30s) and `IdleTimeout` (60s). Closes gosec [G112](https://github.com/securego/gosec/blob/master/issues/slowloris.go) (Slowloris) — a slow client could previously keep a metrics connection open indefinitely by sending request headers byte-by-byte. Also switches the shutdown sentinel check to `errors.Is(err, http.ErrServerClosed)`
+- Annotated the four FD-to-int32 conversions in `internal/upstream/netpoll/poller_poll.go` with `// #nosec G115` and a justification: file descriptors are bounded by `RLIMIT_NOFILE` and always fit in `int32` per the kernel `pollfd` ABI. Closes gosec G115 alerts on these lines without changing runtime behaviour
 
 ### Changed
 - Removed the obsolete `version: "3.8"` attribute from `examples/docker/docker-compose.yml` (Compose v2+ ignores it and warns on each invocation)
