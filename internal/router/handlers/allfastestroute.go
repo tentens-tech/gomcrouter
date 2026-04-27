@@ -6,11 +6,10 @@ import (
 	"github.com/tentens-tech/gomcrouter/internal/proto/ascii"
 	"github.com/tentens-tech/gomcrouter/internal/server/respond"
 	"github.com/tentens-tech/gomcrouter/internal/types"
-	"github.com/tentens-tech/gomcrouter/internal/upstream"
 	"sync/atomic"
 )
 
-func NewAllFastestRouteHandler(pool *upstream.OrderedPool, ctx *config.AppContext) *AllFastestRouteHandler {
+func NewAllFastestRouteHandler(pool Pool, ctx *config.AppContext) *AllFastestRouteHandler {
 	return &AllFastestRouteHandler{
 		ctx:  ctx,
 		pool: pool,
@@ -18,7 +17,7 @@ func NewAllFastestRouteHandler(pool *upstream.OrderedPool, ctx *config.AppContex
 }
 
 type AllFastestRouteHandler struct {
-	pool *upstream.OrderedPool
+	pool Pool
 	ctx  *config.AppContext
 }
 

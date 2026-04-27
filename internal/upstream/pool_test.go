@@ -1,9 +1,12 @@
 package upstream
 
 import (
+	"sync"
+	"testing"
+	"time"
+
 	"github.com/tentens-tech/gomcrouter/internal/config"
 	"go.uber.org/zap"
-	"testing"
 )
 
 type fakeHost struct {
@@ -107,6 +110,36 @@ func TestOrderedPool_FakeHosts_OrderOnFailure(t *testing.T) {
 
 	hosts[0].GoUnhealthy()
 	assertNums(t, p.healthyHosts, []int{1, 4, 5})
+}
+
+// TestOrderedPool_All_ConcurrentWithTransitions exercises the publication
+// of healthyHostsView. With a plain slice field, the writer's slice-header
+// assignment racing against the reader's slice-header load would trip the
+// race detector. atomic.Pointer makes the publication race-free.
+func TestOrderedPool_All_ConcurrentWithTransitions(t *testing.T) {
+	p, hosts := mkPoolWithState([]int{0, 1, 2}, []int{})
+
+	var wg sync.WaitGroup
+	deadline := time.Now().Add(50 * time.Millisecond)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for time.Now().Before(deadline) {
+			hosts[0].GoUnhealthy()
+			hosts[0].GoHealthy()
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for time.Now().Before(deadline) {
+			_ = p.All()
+		}
+	}()
+
+	wg.Wait()
 }
 
 func TestOrderedPool_FakeHosts_OrderFull(t *testing.T) {

@@ -94,21 +94,30 @@ func (p *bufferPool) Put(bb *types.ByteBuf) {
 		return
 	}
 
-	c := cap(bb.B)
-	bb.B = bb.B[:c]
-
-	switch c {
+	// Only buffers whose capacity matches a pooled size class get returned
+	// to a pool. Reslicing to cap is required before pooling (since Get may
+	// have shortened the slice via bb.B[:size]) but must NOT happen for
+	// non-pool buffers — including the static error responses in ascii/* —
+	// because that would mutate their slice header and surface trailing
+	// uninitialized bytes on subsequent writes.
+	switch cap(bb.B) {
 	case XSmallBufferSize:
+		bb.B = bb.B[:XSmallBufferSize]
 		p.xs.Put(bb)
 	case SmallBufferSize:
+		bb.B = bb.B[:SmallBufferSize]
 		p.s.Put(bb)
 	case MediumBufferSize:
+		bb.B = bb.B[:MediumBufferSize]
 		p.m.Put(bb)
 	case LargeBufferSize:
+		bb.B = bb.B[:LargeBufferSize]
 		p.l.Put(bb)
 	case XLargeBufferSize:
+		bb.B = bb.B[:XLargeBufferSize]
 		p.xl.Put(bb)
 	case XXLargeBufferSize:
+		bb.B = bb.B[:XXLargeBufferSize]
 		p.xxl.Put(bb)
 	}
 }

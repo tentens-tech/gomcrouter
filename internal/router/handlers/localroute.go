@@ -6,10 +6,9 @@ import (
 	"github.com/tentens-tech/gomcrouter/internal/proto/ascii"
 	"github.com/tentens-tech/gomcrouter/internal/server/respond"
 	"github.com/tentens-tech/gomcrouter/internal/types"
-	"github.com/tentens-tech/gomcrouter/internal/upstream"
 )
 
-func NewLocalRouteHandler(pool *upstream.OrderedPool, ctx *config.AppContext) *LocalRouteHandler {
+func NewLocalRouteHandler(pool Pool, ctx *config.AppContext) *LocalRouteHandler {
 	return &LocalRouteHandler{
 		ctx:  ctx,
 		pool: pool,
@@ -17,7 +16,7 @@ func NewLocalRouteHandler(pool *upstream.OrderedPool, ctx *config.AppContext) *L
 }
 
 type LocalRouteHandler struct {
-	pool *upstream.OrderedPool
+	pool Pool
 	ctx  *config.AppContext
 }
 

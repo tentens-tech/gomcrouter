@@ -10,7 +10,13 @@ type Handler interface {
 	Handle(req *types.Request)
 }
 
-func NewByPolicy(name config.Policy, pool *upstream.OrderedPool, ctx *config.AppContext) Handler {
+// Pool is the minimal contract handlers need from an upstream pool.
+// *upstream.OrderedPool satisfies it; tests supply a mock implementation.
+type Pool interface {
+	All() []upstream.AsyncDoer
+}
+
+func NewByPolicy(name config.Policy, pool Pool, ctx *config.AppContext) Handler {
 	switch name {
 	case config.AllFastestRoute:
 		return NewAllFastestRouteHandler(pool, ctx)

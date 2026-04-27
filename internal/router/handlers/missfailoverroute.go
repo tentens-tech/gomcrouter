@@ -6,10 +6,9 @@ import (
 	"github.com/tentens-tech/gomcrouter/internal/proto/ascii"
 	"github.com/tentens-tech/gomcrouter/internal/server/respond"
 	"github.com/tentens-tech/gomcrouter/internal/types"
-	"github.com/tentens-tech/gomcrouter/internal/upstream"
 )
 
-func NewMissFailoverRouteHandler(pool *upstream.OrderedPool, ctx *config.AppContext) *MissFailoverRouteHandler {
+func NewMissFailoverRouteHandler(pool Pool, ctx *config.AppContext) *MissFailoverRouteHandler {
 	return &MissFailoverRouteHandler{
 		ctx:  ctx,
 		pool: pool,
@@ -17,7 +16,7 @@ func NewMissFailoverRouteHandler(pool *upstream.OrderedPool, ctx *config.AppCont
 }
 
 type MissFailoverRouteHandler struct {
-	pool *upstream.OrderedPool
+	pool Pool
 	ctx  *config.AppContext
 }
 
