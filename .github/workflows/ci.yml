@@ -262,7 +262,7 @@ jobs:
           echo "_Results uploaded to GitHub Security tab (if enabled)_" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@v4.37.3
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
         continue-on-error: true
         with:
