@@ -5,7 +5,7 @@ ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
 
-FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS build
+FROM --platform=$BUILDPLATFORM golang:1.27-alpine AS build
 
 WORKDIR /build
 COPY go.mod .
