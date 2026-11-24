@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ## Unreleased
 
+---
+
+## v1.4.0 — 2026-11-24
+
 ### Added
 
 - `--version` / `-v` flag
@@ -30,6 +34,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - All GitHub Actions are pinned to commit SHAs (updated by Dependabot), checkouts don't persist credentials
 - `version.Version` defaults to `dev`; releases set it from the tag
 - CODEOWNERS: every pattern lists all its owners (a later `*` line used to override the first one)
+- Maintainer contact in `SECURITY.md` and `CODE_OF_CONDUCT.md` is `slucheninov@gmail.com`
 
 ### Fixed
 
