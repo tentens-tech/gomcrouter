@@ -2,42 +2,45 @@
 
 ## Supported Versions
 
-Security fixes are applied to the most recent minor release line. Please make
-sure you are running a current version before reporting an issue.
+We release patches for security vulnerabilities for the latest minor version:
 
-| Version | Supported |
-|---------|-----------|
-| 1.3.x   | ✅        |
-| < 1.3   | ❌        |
+| Version | Supported          |
+| ------- | ------------------ |
+| 1.4.x   | :white_check_mark: |
+| < 1.4   | :x:                |
 
 ## Reporting a Vulnerability
 
-**Please do not open public GitHub issues for security vulnerabilities.**
+We take security bugs seriously. We appreciate your efforts to responsibly disclose your findings, and will make every effort to acknowledge your contributions.
 
-We accept private reports through two channels:
+### How to Report
 
-1. **GitHub Security Advisories (preferred)** — open a private report at
-   <https://github.com/tentens-tech/gomcrouter/security/advisories/new>.
-2. **Email** — Slava L, `slucheninov@gmail.com`.
+**Please do not report security vulnerabilities through public GitHub issues.**
 
-Please include:
+Instead, report them privately through GitHub:
+[**Report a vulnerability**](https://github.com/tentens-tech/gomcrouter/security/advisories/new)
+(the "Security" tab of the repository → "Report a vulnerability").
 
-- A description of the issue and its impact
-- Steps to reproduce or a minimal proof of concept
-- Affected version, commit hash, or release tag
-- Any suggested mitigation, if known
+Please include the following information in your report:
 
-### What to expect
+- **Type of issue** (e.g., request smuggling, memory corruption, denial of service, information disclosure)
+- **Full paths of source file(s)** related to the manifestation of the issue
+- **Location of the affected source code** (tag/branch/commit or direct URL)
+- **Any special configuration required** to reproduce the issue (router config, flags)
+- **Step-by-step instructions** to reproduce the issue
+- **Proof-of-concept or exploit code** (if possible)
+- **Impact of the issue**, including how an attacker might exploit the issue
 
-- We aim to acknowledge reports within **5 business days**.
-- We work with reporters on a coordinated disclosure timeline, typically up to
-  90 days from the initial report.
-- Fixes are released as patch versions and credited in `CHANGELOG.md` if the
-  reporter wishes to be named.
+### What to Expect
+
+- **Acknowledgment**: We will acknowledge receipt of your vulnerability report within 48 hours.
+- **Communication**: We will keep you informed about our progress throughout the process.
+- **Resolution**: We aim to resolve critical issues within 90 days of the initial report.
+- **Credit**: If you would like, we will credit you in any public disclosure of the vulnerability.
 
 ## Security Considerations
 
-### Network exposure
+### Network Exposure
 
 - The memcached text protocol has no authentication or encryption. Anyone who can reach the router listen address
   (`--listen`, default `tcp://:8080`) can read, write and delete keys on every upstream. Expose it only inside a
@@ -53,10 +56,31 @@ Please include:
   `allowPrivilegeEscalation: false` and all capabilities dropped.
 - The router configuration file is trusted input: keep it read-only for the process.
 
-### For contributors
+## Security Best Practices
 
-- Dependabot keeps Go modules, GitHub Actions (pinned to commit SHAs) and Docker base images up to date.
-- CI runs golangci-lint, gosec, govulncheck and Trivy on every code change; govulncheck fails the build when
-  reachable code is affected by a known vulnerability.
+### For Operators
 
-Thank you for helping keep `gomcrouter` and its users safe.
+1. **Keep Updated**: Regularly update to the latest version
+2. **Network Policies**: Restrict access to the router and metrics ports
+3. **Least Privilege**: Run as non-root with `readOnlyRootFilesystem`, `allowPrivilegeEscalation: false` and dropped capabilities
+4. **Private Network**: Keep the router and the memcached upstreams off the public internet
+
+### For Contributors
+
+1. **Dependency Scanning**: Dependabot keeps Go modules, GitHub Actions (pinned to commit SHAs) and Docker base images up to date
+2. **Code Review**: All changes require code review before merging
+3. **Security Testing**: Include security-focused tests for new features
+4. **Static Analysis**: golangci-lint, gosec, govulncheck and Trivy run as part of CI; govulncheck fails the build when reachable code is affected by a known vulnerability
+
+## Security Updates
+
+Security updates will be released as patch versions and announced via:
+
+- GitHub Security Advisories
+- Release notes
+
+## Attribution
+
+We would like to thank the following individuals for responsibly disclosing security issues:
+
+*None yet - be the first!*
