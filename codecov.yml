@@ -15,9 +15,11 @@ coverage:
         target: auto
         threshold: 1%
 
-# Examples are not runtime code
+# Examples and test helpers are not runtime code
 ignore:
   - "examples/**/*"
+  - "test/**/*"
+  - "internal/upstream/internal/upstreamtest/**/*"
 
 comment:
   layout: "reach,diff,flags,tree"

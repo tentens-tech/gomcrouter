@@ -1,0 +1,7 @@
+# AllFastestRoute: every command goes to all healthy hosts, the fastest response wins
+orderedPool:
+  - memcache1:11211
+  - memcache2:11211
+
+route:
+  type: AllFastestRoute

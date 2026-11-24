@@ -6,7 +6,7 @@ GIT_COMMIT := $(shell git rev-list -1 HEAD)
 LDFLAGS=-X '$(PKG)/version.Version=$(VERSION)'
 
 .DEFAULT_GOAL := build
-.PHONY: help version lint vuln sec test test-race cover e2e clean build docker-build release-tag
+.PHONY: help version lint vuln sec test test-race cover e2e example clean build docker-build release-tag
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-14s %s\n", $$1, $$2}'
@@ -33,7 +33,10 @@ cover: ## Run unit tests with coverage, writes coverage.out
 	go test -race -coverprofile=coverage.out -covermode=atomic ./...
 	go tool cover -func=coverage.out | tail -1
 
-e2e: ## Run the docker-compose example and its end-to-end test
+e2e: ## Run the e2e suites in docker, e.g. make e2e SUITES="routes failover"
+	test/e2e/run.sh $(SUITES)
+
+example: ## Run the docker-compose example and its smoke test
 	cd examples/docker && docker compose up --build --detach --wait && \
 	./test.sh; rc=$$?; docker compose down --volumes; exit $$rc
 
@@ -51,4 +54,4 @@ release-tag: ## Create and push a release tag, e.g. make release-tag TAG=v1.4.0
 	git push origin refs/tags/$(TAG)
 
 clean: ## Remove build outputs
-	rm -f $(BINARY) coverage.out junit.xml
+	rm -rf $(BINARY) coverage.out junit.xml test/e2e/.logs

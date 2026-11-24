@@ -1,0 +1,7 @@
+# LocalRoute: the router answers version and quit itself, other commands are rejected
+orderedPool:
+  - memcache1:11211
+  - memcache2:11211
+
+route:
+  type: LocalRoute

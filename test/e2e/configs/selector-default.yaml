@@ -1,0 +1,7 @@
+# OperationSelectorRoute without policies: every command uses DefaultRoute
+orderedPool:
+  - memcache1:11211
+  - memcache2:11211
+
+route:
+  type: OperationSelectorRoute

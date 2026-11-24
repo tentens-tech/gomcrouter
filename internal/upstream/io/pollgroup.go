@@ -26,6 +26,16 @@ var (
 	ErrClosed  = errors.New("pollgroup is closed")
 
 	ErrClosedByClient = errors.New("pollgroup was closed by client")
+
+	// ErrConnectionClosed is reported when the poller signals a hangup or an
+	// error on a socket that carries no pending SO_ERROR (e.g. the peer closed
+	// the connection, which macOS reports as POLLHUP).
+	ErrConnectionClosed = errors.New("connection closed")
+
+	// ErrRequestTooLarge and ErrResponseTooLarge are reported for messages
+	// that do not fit into the socket buffers (see the buffer-size flag).
+	ErrRequestTooLarge  = errors.New("request does not fit into the socket buffer")
+	ErrResponseTooLarge = errors.New("response does not fit into the socket buffer")
 )
 
 type PollGroup struct {
@@ -172,6 +182,25 @@ func (p *PollGroup) dispatch() {
 	}
 }
 
+// capSleep lowers msec (the event loop's poll sleep, -1 meaning infinite) so
+// that the loop wakes up no later than the earliest pending request deadline
+// and can expire it even when no socket event arrives.
+func (p *PollGroup) capSleep(msec int) int {
+	ts, ok := p.timeoutHeap.PeekTS()
+	if !ok {
+		return msec
+	}
+
+	untilMsec := (ts - time.NanoTime() + 999_999) / 1_000_000 // round up
+	if untilMsec < 0 {
+		untilMsec = 0
+	}
+	if msec < 0 || untilMsec < int64(msec) {
+		return int(untilMsec)
+	}
+	return msec
+}
+
 func (p *PollGroup) dispatchOnSocket(s *socket.Socket) {
 	now := time.NanoTime()
 	for i := 0; i < SocketIOBatch; i++ {
@@ -187,6 +216,13 @@ func (p *PollGroup) dispatchOnSocket(s *socket.Socket) {
 		}
 
 		if !s.Write(req.Raw.B) {
+			if len(req.Raw.B) > s.BufferSize() {
+				// can never be written: fail it instead of blocking the ring
+				_ = p.requestRing.Discard()
+				req.Callback(nil, ErrRequestTooLarge)
+				metric.Collector.HandleUpstreamError(req.Cmd, p.hostId)
+				continue
+			}
 			return
 		}
 
@@ -226,6 +262,12 @@ func (p *PollGroup) onReadable(s *socket.Socket) {
 			return
 		}
 		if n == 0 {
+			if offset == 0 && len(b) == s.BufferSize() {
+				// a full buffer without a complete response would never make
+				// progress (and keeps the socket readable: busy loop)
+				p.recreateSocket(s, ErrResponseTooLarge)
+				return
+			}
 			break
 		}
 
@@ -267,7 +309,13 @@ func (p *PollGroup) onReadable(s *socket.Socket) {
 }
 
 func (p *PollGroup) onSocketErr(s *socket.Socket) {
-	p.recreateSocket(s, getSocketError(s.FD()))
+	err := getSocketError(s.FD())
+	if err == nil {
+		// never fail inflight requests with a nil error: callbacks would get
+		// (nil, nil) and dereference the nil response.
+		err = ErrConnectionClosed
+	}
+	p.recreateSocket(s, err)
 }
 
 func (p *PollGroup) recreateSocket(s *socket.Socket, err error) {

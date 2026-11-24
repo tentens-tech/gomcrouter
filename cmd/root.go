@@ -12,6 +12,7 @@ import (
 	"github.com/tentens-tech/gomcrouter/version"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -40,7 +41,10 @@ func NewRootCmd() *cobra.Command {
 }
 
 func rootCmdDef(cmd *cobra.Command, _ []string) error {
-	ctx, cancel := context.WithCancel(context.Background())
+	// The command context is cancelled on SIGINT, on SIGTERM (docker stop,
+	// Kubernetes) or by the caller of ExecuteContext, which triggers a
+	// graceful shutdown.
+	ctx, cancel := signal.NotifyContext(cmd.Context(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	appCtx, err := config.PrepareAppContext(ctx, cmd.Flags())
@@ -61,9 +65,8 @@ func rootCmdDef(cmd *cobra.Command, _ []string) error {
 	appCtx.Logger.Infof("server threads: %d", appCtx.Config.ServerEventLoops)
 	appCtx.Logger.Info("starting")
 
-	metricsServer := metric.NewServer(ctx, appCtx.Config.ListenMetricsAddr)
-	go metricsServer.Listen()
-
+	// Fail on configuration errors before anything is started, so that an
+	// error return does not leave the metrics server running.
 	routerConfig, err := config.ParseRouterConfig(appCtx.Config.RouterConfigPath)
 	if err != nil {
 		return err
@@ -74,6 +77,9 @@ func rootCmdDef(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	metricsServer := metric.NewServer(ctx, appCtx.Config.ListenMetricsAddr)
+	go metricsServer.Listen()
+
 	r := router.New(appCtx, *routerConfig, eng)
 	srv := server.NewServer(appCtx, r)
 
@@ -81,10 +87,7 @@ func rootCmdDef(cmd *cobra.Command, _ []string) error {
 	go srv.Serve()
 
 	go func() {
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, os.Interrupt)
-		<-sigChan
-		cancel()
+		<-ctx.Done()
 
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), time.Second*5)
 		defer shutdownCancel()

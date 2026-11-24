@@ -1,0 +1,3 @@
+# Not valid YAML
+orderedPool: [memcache1:11211
+route: {type: DefaultRoute

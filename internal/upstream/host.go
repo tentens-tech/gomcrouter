@@ -35,6 +35,9 @@ type Host struct {
 
 	onHealthy   func(int)
 	onUnhealthy func(int)
+
+	// workerDone is closed when hostWorker returns (after ctx is done).
+	workerDone chan struct{}
 }
 
 func NewHost(ctx *config.AppContext, hostname string, onHealthy, onUnhealthy func(int), num int, eng *io.Engine) *Host {
@@ -49,6 +52,7 @@ func NewHost(ctx *config.AppContext, hostname string, onHealthy, onUnhealthy fun
 		engine:      eng,
 		onHealthy:   onHealthy,
 		onUnhealthy: onUnhealthy,
+		workerDone:  make(chan struct{}),
 	}
 
 	go h.hostWorker()
@@ -108,6 +112,8 @@ func (h *Host) init() error {
 }
 
 func (h *Host) hostWorker() {
+	defer close(h.workerDone)
+
 	dnsTicker := time.NewTicker(h.ctx.Config.DnsCacheTTL)
 	healthTicker := time.NewTicker(h.ctx.Config.HealthCheckInterval)
 	defer dnsTicker.Stop()

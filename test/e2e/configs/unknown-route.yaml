@@ -1,0 +1,7 @@
+# An unknown route type falls back to DefaultRoute
+orderedPool:
+  - memcache1:11211
+  - memcache2:11211
+
+route:
+  type: NoSuchRoute

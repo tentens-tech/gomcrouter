@@ -17,6 +17,10 @@ type Request struct {
 
 	Ts   int64
 	Conn gnet.Conn
+	// State orders the replies of Conn, Seq is the position of the request
+	// on it. A nil State writes the reply as soon as it's ready.
+	State *ConnState
+	Seq   uint64
 
 	Callback func(*ByteBuf, error)
 }

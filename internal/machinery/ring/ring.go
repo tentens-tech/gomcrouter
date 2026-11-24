@@ -21,8 +21,11 @@ type MPSC[T any] struct {
 }
 
 func NewMPSC[T any](size int) *MPSC[T] {
-	if size&(size-1) != 0 {
-		panic("ring size must be a power of 2")
+	// size 1 is rejected: with a single cell the sequence of a filled slot
+	// (pos+1) equals the "free" sequence of the next position, so a second
+	// Push would overwrite an unconsumed value.
+	if size < 2 || size&(size-1) != 0 {
+		panic("ring size must be a power of 2 and at least 2")
 	}
 
 	ring := &MPSC[T]{
