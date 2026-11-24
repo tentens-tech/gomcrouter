@@ -34,7 +34,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - All GitHub Actions are pinned to commit SHAs (updated by Dependabot), checkouts don't persist credentials
 - `version.Version` defaults to `dev`; releases set it from the tag
 - CODEOWNERS: every pattern lists all its owners (a later `*` line used to override the first one)
-- `SECURITY.md`: vulnerabilities are reported only through GitHub Security Advisories, the same way as in process-wrapper;
+- `SECURITY.md`: vulnerabilities are reported only through GitHub Security Advisories;
   `CODE_OF_CONDUCT.md` contact is `slucheninov@gmail.com`
 
 ### Fixed
