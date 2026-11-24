@@ -2,6 +2,7 @@ package netpoll
 
 import (
 	"net"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -77,17 +78,37 @@ func TestPoller_WakeupInterruptsBlockingPoll(t *testing.T) {
 	go func() { done <- p.Poll(-1) }()
 
 	// the poller may not be blocked yet: keep waking it up until it returns
-	var pollErr error
-	require.Eventually(t, func() bool {
-		select {
-		case pollErr = <-done:
-			return true
-		default:
-			_ = p.Wakeup()
-			return false
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				_ = p.Wakeup()
+				time.Sleep(time.Millisecond)
+			}
 		}
-	}, 2*time.Second, time.Millisecond)
+	}()
+
+	var pollErr error
+	select {
+	case pollErr = <-done:
+		close(stop)
+		wg.Wait()
+	case <-time.After(2 * time.Second):
+		close(stop)
+		wg.Wait()
+		require.FailNow(t, "wakeup did not interrupt the blocking poll")
+	}
 	require.NoError(t, pollErr)
+
+	// the producer may have woken the poller again after the blocking poll
+	// returned: consume that wakeup before checking the state
+	require.NoError(t, p.Poll(0))
 
 	// a wakeup is consumed (pipe drained, flag reset) by the poll it ended
 	assert.Zero(t, atomic.LoadInt32(&p.wakeupCall))
@@ -161,6 +182,42 @@ func TestPoller_ReadWriteEvents(t *testing.T) {
 	pollUntil(t, p, func() bool { return len(ev.r) > 0 })
 	assert.Same(t, s, ev.r[0])
 	assert.Empty(t, ev.e)
+}
+
+func TestPoller_NoWriteCallbackAfterTheReadCallbackReplacedTheSocket(t *testing.T) {
+	p := newTestPoller(t)
+	s, peer := newConn(t)
+	t.Cleanup(s.Close)
+	repl, _ := newConn(t)
+	t.Cleanup(repl.Close)
+
+	var writes []*socket.Socket
+	replaced := false
+	p.Register(s,
+		func(s *socket.Socket) {
+			// like PollGroup.recreateSocket
+			p.Delete(s.FD())
+			p.Register(repl, func(*socket.Socket) {}, func(w *socket.Socket) { writes = append(writes, w) }, func(*socket.Socket) {})
+			replaced = true
+		},
+		func(w *socket.Socket) {
+			if replaced {
+				writes = append(writes, w)
+			}
+		},
+		func(*socket.Socket) {},
+	)
+
+	// readable and writable in the same poll
+	require.True(t, s.Write([]byte("version\r\n")))
+	require.NoError(t, p.Mod(s))
+	_, err := peer.Write([]byte("VERSION 1\r\n"))
+	require.NoError(t, err)
+	pollUntil(t, p, func() bool { return replaced })
+
+	for _, w := range writes {
+		assert.NotSame(t, s, w, "the write callback ran on the replaced socket")
+	}
 }
 
 func TestPoller_ErrorEvent(t *testing.T) {

@@ -1,7 +1,9 @@
 package io
 
 import (
+	"errors"
 	"fmt"
+	"github.com/tentens-tech/gomcrouter/internal/types"
 	"strings"
 	"testing"
 	"time"
@@ -104,7 +106,7 @@ func TestPollGroup_Responses(t *testing.T) {
 		{name: "get miss", cmd: ascii.GetCmd, raw: "get nope\r\n", want: "END\r\n"},
 		{name: "get hit", cmd: ascii.GetCmd, raw: "get k\r\n", want: "VALUE k 0 1\r\nv\r\nEND\r\n"},
 		{name: "multi get", cmd: ascii.GetCmd, raw: "get k nope k\r\n", want: "VALUE k 0 1\r\nv\r\nVALUE k 0 1\r\nv\r\nEND\r\n"},
-		{name: "gets", cmd: ascii.GetsCmd, raw: "gets k\r\n", want: "VALUE k 0 1\r\nv\r\nEND\r\n"},
+		{name: "gets", cmd: ascii.GetsCmd, raw: "gets k\r\n", want: "VALUE k 0 1 1\r\nv\r\nEND\r\n"},
 		{
 			name: "value larger than a single socket read",
 			cmd:  ascii.GetCmd,
@@ -228,7 +230,11 @@ func TestPollGroup_CapSleep(t *testing.T) {
 	got := pg.capSleep(-1)
 	assert.InDelta(t, 1000, got, 100, "infinite sleep is capped by the request deadline")
 	assert.Equal(t, 5, pg.capSleep(5), "shorter sleeps are kept")
-	assert.Equal(t, got, pg.capSleep(5000))
+	// each call samples the clock, so a later one may be a millisecond (or
+	// more on a slow machine) shorter, never longer
+	longer := pg.capSleep(5000)
+	assert.LessOrEqual(t, longer, got, "longer sleeps are capped by the request deadline")
+	assert.InDelta(t, 1000, longer, 100)
 
 	// overdue deadline: do not sleep at all
 	pg.timeoutHeap.Push(1, nil)
@@ -529,6 +535,36 @@ func TestPollGroup_RequestLargerThanBufferIsRejected(t *testing.T) {
 	pump(t, pg, poller, received(ch, &r))
 	require.NoError(t, r.err)
 	assert.Equal(t, "VERSION 1.6.0-fake\r\n", string(r.resp))
+}
+
+func TestPollGroup_RunOfOversizedRequestsDoesNotStallTheQueue(t *testing.T) {
+	srv := upstreamtest.NewServer(t)
+	ctx := upstreamtest.NewAppContext(t, func(c *config.App) {
+		c.UpstreamConnections = 1
+		c.BufferSize = 1024
+	})
+	pg, _, _ := newTestPollGroup(t, ctx, srv.Addr())
+
+	// more rejected requests than one dispatch batch, then a valid one
+	big := "set k 0 0 2000\r\n" + strings.Repeat("x", 2000) + "\r\n"
+	rejected := 0
+	for range 2*SocketIOBatch + 1 {
+		req, _ := newReq(ascii.SetCmd, big)
+		req.Callback = func(_ *types.ByteBuf, err error) {
+			if errors.Is(err, ErrRequestTooLarge) {
+				rejected++
+			}
+		}
+		require.True(t, pg.Enqueue(req))
+	}
+	req, _ := newReq(ascii.VersionCmd, "version\r\n")
+	require.True(t, pg.Enqueue(req))
+
+	// a single wakeup: one dispatch must get to the valid request
+	pg.dispatch()
+	assert.Equal(t, 2*SocketIOBatch+1, rejected)
+	_, queued := pg.requestRing.Peek()
+	assert.False(t, queued, "the valid request is still queued")
 }
 
 func TestPollGroup_ResponseLargerThanBufferFailsSocket(t *testing.T) {

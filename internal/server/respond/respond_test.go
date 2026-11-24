@@ -164,7 +164,17 @@ func TestAsyncRespond_NilReplyReleasesItsTurn(t *testing.T) {
 	assert.Equal(t, uint64(2), st.Written)
 }
 
+// closeAtOnce makes the ordered close call the fake connection's Close: the
+// fake has no event loop to wait on.
+func closeAtOnce(t *testing.T) {
+	t.Helper()
+	orig := closeConn
+	closeConn = func(c gnet.Conn, _ *types.ConnState, _ int64) { _ = c.Close() }
+	t.Cleanup(func() { closeConn = orig })
+}
+
 func TestAsyncRespondAndClose_AfterEarlierReplies(t *testing.T) {
+	closeAtOnce(t)
 	conn := newFakeConn()
 	st := &types.ConnState{}
 	req := &types.Request{Conn: conn, State: st, Seq: st.NextSeq}
@@ -183,6 +193,7 @@ func TestAsyncRespondAndClose_AfterEarlierReplies(t *testing.T) {
 }
 
 func TestAsyncRespondAndClose_WithoutReply(t *testing.T) {
+	closeAtOnce(t)
 	conn := newFakeConn()
 
 	AsyncRespondAndClose(conn, &types.ConnState{}, nil)

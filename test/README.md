@@ -29,7 +29,7 @@ the `late` and `dns` suites start their own nodes. Requests are sent from the `g
 `e2e-client`:
 
 - `e2e-client raw 'set k 0 0 1\r\nv\r\n' 'get k\r\n'` sends raw requests and prints the replies, to compare them
-  byte by byte;
+  byte by byte (with `-closed` it also requires the server to close the connection);
 - `e2e-client load -conns 32 -ops 500 -size 200 -pipeline 16` writes unique keys from many connections, reads them
   back in pipelined batches and fails on any value that doesn't belong to its request.
 

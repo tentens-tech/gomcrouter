@@ -14,6 +14,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 - `quit` was proxied to memcached, which closed the upstream connection shared by other clients and failed their
   in-flight requests. The router now closes the client connection itself, after the replies to the earlier requests
 - A malformed request closed the connection before the replies to the earlier pipelined requests were sent
+- Replies to a slow client were cut off when the connection was closed after `quit` or a malformed request; the
+  connection is now closed only once its replies are sent (or after 30 seconds)
 - SIGTERM (`docker stop`, Kubernetes) killed the router without a graceful shutdown; it's handled like SIGINT
 - `--log-level debug` had no effect
 - A storage command or a VALUE reply declaring a length close to the maximum integer crashed the router
@@ -21,10 +23,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
   the upstream connection
 - Requests to an upstream that doesn't answer never timed out while the router had no other traffic
 - On macOS a connection closed by memcached failed the in-flight requests with a nil error (crash in the route handler)
-- A request or a reply larger than `--buffer-size` blocked the upstream connection forever, it now fails
+- A request or a reply larger than `--buffer-size` blocked the upstream connection forever, it now fails; a run of
+  such requests no longer delays the requests queued after it
+- A socket replaced while handling a read could get a write callback meant for the old one
 - Removing an upstream that shares its address with another one could remove the wrong one; one in three hosts was
   skipped when the upstream poller had to be recreated
-- Metric events from several event loops were lost and raced; the request metrics could get a wrong `cmd` label
+- Metric events from several event loops were lost and raced; the request and upstream error metrics could get a
+  wrong `cmd` label
 - Data races on shutdown of the metrics server and the gnet server, and a stop before the start left them running
 - The router config is checked before the metrics server starts, so a config error doesn't leave it listening
 

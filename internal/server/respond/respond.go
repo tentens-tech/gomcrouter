@@ -1,6 +1,9 @@
 package respond
 
 import (
+	"context"
+	stdtime "time"
+
 	"github.com/panjf2000/gnet/v2"
 	"github.com/pkg/errors"
 	"github.com/tentens-tech/gomcrouter/internal/machinery/pool"
@@ -33,9 +36,18 @@ func AsyncRespondAndClose(conn gnet.Conn, st *types.ConnState, resp *types.ByteB
 	reply(conn, st, seq, types.Reply{Resp: resp, Close: true})
 }
 
+// A closing connection waits up to closeFlushTimeout for the client to read
+// the queued replies, checking every closeFlushRetry.
+var (
+	closeFlushTimeout = int64(30 * stdtime.Second)
+	closeFlushRetry   = 5 * stdtime.Millisecond
+	// closeConn is replaced in tests that use a fake connection
+	closeConn = closeWhenFlushed
+)
+
 func reply(conn gnet.Conn, st *types.ConnState, seq uint64, r types.Reply) {
 	if st == nil {
-		write(conn, r)
+		write(conn, nil, r)
 		return
 	}
 
@@ -50,7 +62,7 @@ func reply(conn gnet.Conn, st *types.ConnState, seq uint64, r types.Reply) {
 		return
 	}
 
-	write(conn, r)
+	write(conn, st, r)
 	st.Written++
 	for {
 		next, ok := st.Pending[st.Written]
@@ -58,14 +70,14 @@ func reply(conn gnet.Conn, st *types.ConnState, seq uint64, r types.Reply) {
 			return
 		}
 		delete(st.Pending, st.Written)
-		write(conn, next)
+		write(conn, st, next)
 		st.Written++
 	}
 }
 
 // write queues the reply on the event loop of the connection. gnet runs the
 // queued writes before a queued close, in the order they were queued.
-func write(conn gnet.Conn, r types.Reply) {
+func write(conn gnet.Conn, st *types.ConnState, r types.Reply) {
 	if r.Resp != nil {
 		resp, cmd, ts, report := r.Resp, r.Cmd, r.Ts, !r.Close
 		err := conn.AsyncWrite(resp.B, func(_ gnet.Conn, _ error) error {
@@ -84,6 +96,32 @@ func write(conn gnet.Conn, r types.Reply) {
 	}
 
 	if r.Close {
+		if st == nil {
+			_ = conn.Close()
+			return
+		}
+		closeConn(conn, st, time.NanoTime()+closeFlushTimeout)
+	}
+}
+
+// closeWhenFlushed closes the connection once gnet has sent everything queued
+// for it: gnet's own close writes the rest of the outbound buffer only while
+// the socket accepts it, so a client reading slowly would lose the end of the
+// replies. The check runs on the event loop after the queued writes.
+func closeWhenFlushed(conn gnet.Conn, st *types.ConnState, deadline int64) {
+	check := gnet.RunnableFunc(func(context.Context) error {
+		if st.Closed {
+			return nil
+		}
+		if conn.OutboundBuffered() > 0 && time.NanoTime() < deadline {
+			stdtime.AfterFunc(closeFlushRetry, func() { closeWhenFlushed(conn, st, deadline) })
+			return nil
+		}
+		_ = conn.EventLoop().Close(conn)
+		return nil
+	})
+	if err := conn.EventLoop().Execute(context.Background(), check); err != nil {
+		// the engine is shutting down and closes every connection
 		_ = conn.Close()
 	}
 }

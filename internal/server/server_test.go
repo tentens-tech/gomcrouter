@@ -39,7 +39,10 @@ type fakeMemcached struct {
 	mu    sync.Mutex
 	data  map[string]string
 	conns []net.Conn
-	wg    sync.WaitGroup
+	wg    sync.WaitGroup // connection workers
+	// acceptDone is closed when acceptLoop returns: no connection is
+	// registered after that
+	acceptDone chan struct{}
 }
 
 func startFakeMemcached(t *testing.T) *fakeMemcached {
@@ -47,8 +50,7 @@ func startFakeMemcached(t *testing.T) *fakeMemcached {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 
-	m := &fakeMemcached{ln: ln, data: map[string]string{}}
-	m.wg.Add(1)
+	m := &fakeMemcached{ln: ln, data: map[string]string{}, acceptDone: make(chan struct{})}
 	go m.acceptLoop()
 	t.Cleanup(m.close)
 	return m
@@ -58,6 +60,7 @@ func (m *fakeMemcached) addr() string { return m.ln.Addr().String() }
 
 func (m *fakeMemcached) close() {
 	_ = m.ln.Close()
+	<-m.acceptDone
 	m.mu.Lock()
 	for _, c := range m.conns {
 		_ = c.Close()
@@ -67,7 +70,7 @@ func (m *fakeMemcached) close() {
 }
 
 func (m *fakeMemcached) acceptLoop() {
-	defer m.wg.Done()
+	defer close(m.acceptDone)
 	for {
 		c, err := m.ln.Accept()
 		if err != nil {
@@ -431,7 +434,8 @@ func pipelineRoundTrip(addr string, client, batches, batch int) error {
 
 func TestServer_QuitIsAnsweredLocally(t *testing.T) {
 	mc := startFakeMemcached(t)
-	cl := dial(t, startRouter(t, defaultRoute, mc.addr()))
+	addr := startRouter(t, defaultRoute, mc.addr())
+	cl := dial(t, addr)
 
 	// the reply to set comes first, the requests after quit are dropped
 	cl.send("set k 0 0 1\r\nx\r\nquit\r\nget k\r\n")
@@ -442,9 +446,40 @@ func TestServer_QuitIsAnsweredLocally(t *testing.T) {
 	assert.Zero(t, mc.quits.Load(), "quit must not reach the shared upstream connection")
 
 	// the upstream connection still works for other clients
-	other := dial(t, startRouter(t, defaultRoute, mc.addr()))
+	other := dial(t, addr)
 	other.send("get k\r\n")
 	assert.Equal(t, "VALUE k 0 1\r\n", other.line())
+}
+
+func TestServer_QuitAfterLargeRepliesToASlowReader(t *testing.T) {
+	mc := startFakeMemcached(t)
+	const keys, size = 64, 60 * 1024 // ~4 MB of replies, more than the socket buffers
+	value := strings.Repeat("v", size)
+	for i := range keys {
+		mc.data[fmt.Sprintf("k%d", i)] = value
+	}
+	cl := dial(t, startRouter(t, defaultRoute, mc.addr()))
+
+	var reqs strings.Builder
+	for i := range keys {
+		fmt.Fprintf(&reqs, "get k%d\r\n", i)
+	}
+	reqs.WriteString("quit\r\n")
+	cl.send(reqs.String())
+
+	// the client doesn't read for a while: the replies pile up in the
+	// router, the close must wait for them
+	time.Sleep(300 * time.Millisecond)
+
+	for i := range keys {
+		want := fmt.Sprintf("VALUE k%d 0 %d\r\n%s\r\nEND\r\n", i, size, value)
+		got := make([]byte, len(want))
+		_, err := io.ReadFull(cl.r, got)
+		require.NoError(t, err, "reply %d", i)
+		require.Equal(t, want, string(got), "reply %d", i)
+	}
+	_, err := cl.r.ReadByte()
+	require.ErrorIs(t, err, io.EOF)
 }
 
 func TestServer_MalformedRequestAfterPipelinedRequests(t *testing.T) {

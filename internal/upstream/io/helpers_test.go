@@ -115,6 +115,7 @@ func newTestPollGroup(t *testing.T, ctx *config.AppContext, addr string) (*PollG
 	t.Helper()
 	poller, err := netpoll.NewPoller()
 	require.NoError(t, err)
+	t.Cleanup(poller.Close)
 
 	h := &hooks{}
 	pg, err := newPollGroup(addr, hostID(addr), ctx, poller,
@@ -122,10 +123,8 @@ func newTestPollGroup(t *testing.T, ctx *config.AppContext, addr string) (*PollG
 		func() { h.failures++ },
 	)
 	require.NoError(t, err)
-	t.Cleanup(func() {
-		pg.Drain()
-		poller.Close()
-	})
+	// cleanups run LIFO: the pollgroup is drained before the poller closes
+	t.Cleanup(pg.Drain)
 	return pg, poller, h
 }
 

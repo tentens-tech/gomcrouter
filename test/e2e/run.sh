@@ -67,6 +67,8 @@ stopped() { ! running; }
 exit_code() { [ "$(docker inspect -f '{{.State.ExitCode}}' "$CUR")" = "$1" ]; }
 # miss <1|2> <key>: the key isn't on the memcached node
 miss()    { expect 'END\r\n' direct "$1" "get $2\r\n"; }
+# closes <request>...: the router answers nothing and closes the connection
+closes()  { local out; out=$(tools e2e-client -addr "$CUR:${PORT:-8080}" -closed raw "$@") && [ -z "$out" ]; }
 # key <name>: a key unique for the run
 key()     { echo "e2e-$SUITE-$1-$RUN"; }
 # set_via <command> <key> <value>: store a value with the command (set, add, ...)
@@ -225,7 +227,7 @@ suite_protocol() {
   check "malformed request" has "CLIENT_ERROR" mc 'set\r\n'
   check "unknown command" has "ERROR" mc 'bogus\r\n'
   check "router keeps serving after errors" expect 'END\r\n' mc "get $(key none)\r\n"
-  check "quit closes the connection" expect '' mc 'quit\r\n'
+  check "quit closes the connection" closes 'quit\r\n'
   check "replies to pipelined requests keep their order" \
     tools e2e-client -addr "$CUR:8080" load -conns 16 -ops 300 -pipeline 16
   check "no upstream errors (quit isn't sent to memcached)" eval '! has_log "route: "'
@@ -272,7 +274,7 @@ suite_routes() {
   check "LocalRoute: version is answered by the router" expect "VERSION $VERSION gomcrouter\r\n" mc 'version\r\n'
   check "LocalRoute: other commands are rejected" has "SERVER_ERROR gomcrouter: request does not match policy handler" \
     mc "get $(key local)\r\n"
-  check "LocalRoute: quit closes the connection" expect '' mc 'quit\r\n'
+  check "LocalRoute: quit closes the connection" closes 'quit\r\n'
   finish
 
   start unknown test/e2e/configs/unknown-route.yaml
@@ -385,6 +387,8 @@ suite_dns() {
   waitcheck "ready" 15 healthy 1
   check "set on the first address" expect 'STORED\r\n' store "$k" a
   check "value is on the first node" has "VALUE" direct 10.213.77.10:11211 "get $k\r\n"
+  # detach the old node even when E2E_KEEP keeps it, so its address is free
+  docker network disconnect "$NET" gmr-dns-a >/dev/null 2>&1 || true
   finish gmr-dns-a
   memcached gmr-dns-b memcache-dns --ip 10.213.77.11
   waitcheck "address change is detected" 20 has_log "address changed to 10.213.77.11:11211"

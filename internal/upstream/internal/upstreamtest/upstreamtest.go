@@ -41,6 +41,15 @@ const (
 	ModeMalformed
 )
 
+// CAS is the cas unique the fake server reports for every gets hit. It is
+// fixed so tests can spell out the expected response.
+const CAS = 1
+
+// MaxBodyLen bounds the data block of a storage command. The fake server
+// closes the connection on larger (or negative) lengths instead of
+// allocating the buffer.
+const MaxBodyLen = 16 << 20
+
 // MalformedResponse is a VALUE block followed by garbage instead of END.
 var MalformedResponse = []byte("VALUE k 0 1\r\nx\r\nGARBAGE\r\n")
 
@@ -245,7 +254,10 @@ func (s *Server) serve(c net.Conn, done chan struct{}) {
 	}
 }
 
-var errQuit = errors.New("quit")
+var (
+	errQuit    = errors.New("quit")
+	errBodyLen = errors.New("data block length out of range")
+)
 
 func (s *Server) handle(line []byte, r *bufio.Reader) ([]byte, error) {
 	fields := bytes.Fields(line)
@@ -255,6 +267,7 @@ func (s *Server) handle(line []byte, r *bufio.Reader) ([]byte, error) {
 
 	switch string(fields[0]) {
 	case "get", "gets":
+		withCAS := string(fields[0]) == "gets"
 		var out bytes.Buffer
 		s.mu.Lock()
 		for _, k := range fields[1:] {
@@ -262,7 +275,11 @@ func (s *Server) handle(line []byte, r *bufio.Reader) ([]byte, error) {
 			if !ok {
 				continue
 			}
-			_, _ = fmt.Fprintf(&out, "VALUE %s 0 %d\r\n%s\r\n", k, len(v), v)
+			if withCAS {
+				_, _ = fmt.Fprintf(&out, "VALUE %s 0 %d %d\r\n%s\r\n", k, len(v), CAS, v)
+			} else {
+				_, _ = fmt.Fprintf(&out, "VALUE %s 0 %d\r\n%s\r\n", k, len(v), v)
+			}
 		}
 		s.mu.Unlock()
 		out.WriteString("END\r\n")
@@ -272,8 +289,11 @@ func (s *Server) handle(line []byte, r *bufio.Reader) ([]byte, error) {
 			return []byte("CLIENT_ERROR bad command line format\r\n"), nil
 		}
 		n, convErr := strconv.Atoi(string(fields[4]))
-		if convErr != nil || n < 0 {
+		if convErr != nil {
 			return []byte("CLIENT_ERROR bad data chunk\r\n"), nil //nolint:nilerr // protocol error answered to the client
+		}
+		if n < 0 || n > MaxBodyLen {
+			return nil, errBodyLen
 		}
 		body := make([]byte, n+2)
 		if _, err := io.ReadFull(r, body); err != nil {

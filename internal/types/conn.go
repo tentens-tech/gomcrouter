@@ -14,6 +14,8 @@ type ConnState struct {
 	// Quit is set once the connection is closing: the requests after quit
 	// and after a malformed request are dropped. Event loop only.
 	Quit bool
+	// Closed is set by OnClose: the connection is gone. Event loop only.
+	Closed bool
 
 	Mu sync.Mutex
 	// Written is the sequence number of the next reply to write.

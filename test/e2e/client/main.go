@@ -3,7 +3,8 @@
 //
 //	e2e-client [-addr host:port] raw 'set k 0 0 1\r\nv\r\n' 'get k\r\n'
 //	    sends every argument (\r, \n and \t are unescaped) and prints the
-//	    responses. A response ends when the server is idle for -idle.
+//	    responses. A response ends when the server is idle for -idle. With
+//	    -closed it fails unless the server closes the connection.
 //	e2e-client [-addr host:port] load -conns 16 -ops 1000 -size 100 -pipeline 8
 //	    every connection writes unique keys, reads them back in batches of
 //	    -pipeline requests and checks the values. Exits 1 on any mismatch.
@@ -31,6 +32,7 @@ func main() {
 	addr := flag.String("addr", "localhost:8080", "memcached address")
 	timeout := flag.Duration("timeout", 5*time.Second, "dial and read timeout")
 	idle := flag.Duration("idle", 300*time.Millisecond, "raw: a response ends after this idle time")
+	closed := flag.Bool("closed", false, "raw: fail unless the server closes the connection")
 	flag.Parse()
 
 	if flag.NArg() < 1 {
@@ -41,7 +43,7 @@ func main() {
 	var err error
 	switch flag.Arg(0) {
 	case "raw":
-		err = raw(*addr, *timeout, *idle, flag.Args()[1:])
+		err = raw(*addr, *timeout, *idle, *closed, flag.Args()[1:])
 	case "load":
 		err = load(*addr, *timeout, flag.Args()[1:])
 	default:
@@ -57,7 +59,7 @@ func unescape(s string) string {
 	return strings.NewReplacer(`\r`, "\r", `\n`, "\n", `\t`, "\t").Replace(s)
 }
 
-func raw(addr string, timeout, idle time.Duration, reqs []string) error {
+func raw(addr string, timeout, idle time.Duration, closed bool, reqs []string) error {
 	conn, err := net.DialTimeout("tcp", addr, timeout)
 	if err != nil {
 		return err
@@ -65,6 +67,7 @@ func raw(addr string, timeout, idle time.Duration, reqs []string) error {
 	defer func() { _ = conn.Close() }()
 
 	buf := make([]byte, 64*1024)
+	eof := false
 	for _, req := range reqs {
 		if _, err = conn.Write([]byte(unescape(req))); err != nil {
 			return err
@@ -78,13 +81,20 @@ func raw(addr string, timeout, idle time.Duration, reqs []string) error {
 			_, _ = os.Stdout.Write(buf[:n])
 			if rerr != nil {
 				var nerr net.Error
-				if errors.As(rerr, &nerr) && nerr.Timeout() || errors.Is(rerr, io.EOF) {
+				if errors.Is(rerr, io.EOF) {
+					eof = true
+					break
+				}
+				if errors.As(rerr, &nerr) && nerr.Timeout() {
 					break
 				}
 				return rerr
 			}
 			deadline = idle
 		}
+	}
+	if closed && !eof {
+		return errors.New("the server didn't close the connection")
 	}
 	return nil
 }
@@ -190,7 +200,7 @@ func loadConn(addr string, timeout time.Duration, run string, c, ops, size, pipe
 			return err
 		}
 		for i := base; i < base+n; i++ {
-			got, rerr := readValue(r)
+			got, rerr := readValue(r, key(i))
 			if rerr != nil {
 				return fmt.Errorf("get %s: %w", key(i), rerr)
 			}
@@ -211,7 +221,7 @@ func head(b []byte) []byte {
 }
 
 // readValue reads a single-key get response: VALUE <key> <flags> <bytes>\r\n<data>\r\nEND\r\n
-func readValue(r *bufio.Reader) ([]byte, error) {
+func readValue(r *bufio.Reader, key string) ([]byte, error) {
 	line, err := r.ReadString('\n')
 	if err != nil {
 		return nil, err
@@ -222,6 +232,9 @@ func readValue(r *bufio.Reader) ([]byte, error) {
 	fields := strings.Fields(line)
 	if len(fields) < 4 {
 		return nil, fmt.Errorf("malformed VALUE line %q", line)
+	}
+	if fields[1] != key {
+		return nil, fmt.Errorf("key mismatch: got %q", fields[1])
 	}
 	n, err := strconv.Atoi(fields[3])
 	if err != nil {

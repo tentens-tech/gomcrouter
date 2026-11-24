@@ -135,14 +135,16 @@ func (p *PollGroup) NumSockets() int {
 
 func (p *PollGroup) Enqueue(req *types.Request) bool {
 	if !p.active.Load() {
-		req.Callback(nil, ErrClosed)
+		// the metric first: the callback may return the request to its pool
 		metric.Collector.HandleUpstreamError(req.Cmd, p.hostId)
+		req.Callback(nil, ErrClosed)
 		return false
 	}
 
 	if !p.requestRing.Push(req) {
-		req.Callback(nil, ErrBusy)
+		// the metric first: the callback may return the request to its pool
 		metric.Collector.HandleUpstreamError(req.Cmd, p.hostId)
+		req.Callback(nil, ErrBusy)
 		return false
 	}
 
@@ -157,8 +159,9 @@ func (p *PollGroup) expireInflightRequest(r *types.InflightRequest) {
 	// request was not seen in onReadable(). can't be safely returned to pool.
 	if r.Status == types.InflightRequestStatus {
 		r.Status = types.CancelledRequestStatus
-		r.Request.Callback(nil, ErrTimeout)
+		// the metric first: the callback may return the request to its pool
 		metric.Collector.HandleUpstreamError(r.Request.Cmd, p.hostId)
+		r.Request.Callback(nil, ErrTimeout)
 		return
 	}
 
@@ -203,7 +206,10 @@ func (p *PollGroup) capSleep(msec int) int {
 
 func (p *PollGroup) dispatchOnSocket(s *socket.Socket) {
 	now := time.NanoTime()
-	for i := 0; i < SocketIOBatch; i++ {
+	// i counts the requests written: rejected oversized requests don't use the
+	// batch, so a run of them can't leave the next requests waiting for a
+	// wakeup that never comes
+	for i := 0; i < SocketIOBatch; {
 		if !s.CanPushToInflight() {
 			return
 		}
@@ -219,8 +225,9 @@ func (p *PollGroup) dispatchOnSocket(s *socket.Socket) {
 			if len(req.Raw.B) > s.BufferSize() {
 				// can never be written: fail it instead of blocking the ring
 				_ = p.requestRing.Discard()
-				req.Callback(nil, ErrRequestTooLarge)
+				// the metric first: the callback may return the request to its pool
 				metric.Collector.HandleUpstreamError(req.Cmd, p.hostId)
+				req.Callback(nil, ErrRequestTooLarge)
 				continue
 			}
 			return
@@ -235,6 +242,7 @@ func (p *PollGroup) dispatchOnSocket(s *socket.Socket) {
 		s.PushToInflight(in)
 
 		p.timeoutHeap.Push(now+p.ctx.Config.TimeoutNs, in)
+		i++
 	}
 }
 
@@ -355,8 +363,9 @@ func (p *PollGroup) drainPollGroup(err error) {
 			break
 		}
 
-		req.Callback(nil, errors.Wrap(err, "poll group was closed"))
+		// the metric first: the callback may return the request to its pool
 		metric.Collector.HandleUpstreamError(req.Cmd, p.hostId)
+		req.Callback(nil, errors.Wrap(err, "poll group was closed"))
 	}
 
 	p.sockets = nil
@@ -375,8 +384,9 @@ func (p *PollGroup) drainSocketWithErr(s *socket.Socket, err error) {
 		}
 
 		inflightReq.Status = types.DoneRequestStatus
-		inflightReq.Request.Callback(nil, errors.Wrap(err, "socket was closed"))
+		// the metric first: the callback may return the request to its pool
 		metric.Collector.HandleUpstreamError(inflightReq.Request.Cmd, p.hostId)
+		inflightReq.Request.Callback(nil, errors.Wrap(err, "socket was closed"))
 	}
 
 	p.poller.Delete(s.FD())

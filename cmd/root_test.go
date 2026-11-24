@@ -44,9 +44,10 @@ func startFakeMemcached(t *testing.T) string {
 	require.NoError(t, err)
 
 	var (
-		mu    sync.Mutex
-		conns []net.Conn
-		wg    sync.WaitGroup
+		mu     sync.Mutex
+		conns  []net.Conn
+		closed bool // set by cleanup; later conns are closed on accept
+		wg     sync.WaitGroup
 	)
 	wg.Add(1)
 	go func() {
@@ -57,6 +58,13 @@ func startFakeMemcached(t *testing.T) string {
 				return
 			}
 			mu.Lock()
+			if closed {
+				// accepted after cleanup closed the tracked conns: nobody
+				// would close it, so do not start a reader on it
+				mu.Unlock()
+				_ = c.Close()
+				continue
+			}
 			conns = append(conns, c)
 			mu.Unlock()
 			wg.Add(1)
@@ -85,6 +93,7 @@ func startFakeMemcached(t *testing.T) string {
 	t.Cleanup(func() {
 		_ = ln.Close()
 		mu.Lock()
+		closed = true
 		for _, c := range conns {
 			_ = c.Close()
 		}

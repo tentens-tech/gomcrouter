@@ -150,7 +150,10 @@ func (p *Poller) Poll(maxSleepMsec int) error {
 			pa.onR(pa.sock)
 		}
 
-		if re&unix.POLLOUT != 0 {
+		// the read callback may have replaced the socket (Delete, then a
+		// new Register that can reuse the descriptor): never flush the
+		// old socket's buffer after that
+		if re&unix.POLLOUT != 0 && i < len(p.attachments) && p.attachments[i] == pa {
 			pa.onW(pa.sock)
 		}
 	}

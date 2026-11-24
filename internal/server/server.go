@@ -84,6 +84,14 @@ func (s *Server) OnOpen(c gnet.Conn) ([]byte, gnet.Action) {
 	return nil, gnet.None
 }
 
+// OnClose stops the pending close of the connection (see respond).
+func (s *Server) OnClose(c gnet.Conn, _ error) gnet.Action {
+	if st, ok := c.Context().(*types.ConnState); ok {
+		st.Closed = true
+	}
+	return gnet.None
+}
+
 func (s *Server) OnTraffic(c gnet.Conn) (action gnet.Action) {
 	st := c.Context().(*types.ConnState) //nolint:errcheck // set in OnOpen
 

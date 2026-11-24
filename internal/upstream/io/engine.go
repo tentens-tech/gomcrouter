@@ -53,6 +53,12 @@ func (e *Engine) Stop() {
 	_ = e.poller.Wakeup()
 }
 
+// Close releases the poller. Call it only after the event loop has returned
+// and no host uses the engine.
+func (e *Engine) Close() {
+	e.poller.Close()
+}
+
 func (e *Engine) EnrollHost(addr string, hostId int, onFailureHook func()) (*PollGroup, error) {
 	pg, err := newPollGroup(
 		addr,
@@ -107,7 +113,13 @@ func (e *Engine) eventLoop() {
 			}
 
 			pg.dispatch()
-			sleepMsec = pg.capSleep(sleepMsec)
+		}
+		// the caps are computed after every group dispatched, so the time
+		// spent dispatching doesn't delay an earlier group's deadline
+		for _, pg := range e.pollGroups {
+			if pg.IsActive() {
+				sleepMsec = pg.capSleep(sleepMsec)
+			}
 		}
 
 		err := e.poller.Poll(sleepMsec)

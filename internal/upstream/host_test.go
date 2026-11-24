@@ -40,6 +40,9 @@ func newEnv(t *testing.T, opts ...upstreamtest.Options) *env {
 	require.NoError(t, err)
 
 	e := &env{t: t, ctx: ctx, cancel: cancel, eng: eng}
+	// registered first, so it runs last: after the host workers and the event
+	// loop (whose cleanups wait for them) have exited
+	t.Cleanup(eng.Close)
 	t.Cleanup(cancel)
 	return e
 }
@@ -96,7 +99,9 @@ func stopHost(t *testing.T, cancel context.CancelFunc, h *Host) {
 		select {
 		case <-h.workerDone:
 		case <-time.After(waitFor):
-			t.Error("host worker did not stop")
+			// draining would race with the still running worker
+			t.Error("host worker did not stop, not draining the host")
+			return
 		}
 		h.drain()
 	})
@@ -269,9 +274,11 @@ func TestHost_HealthWorker(t *testing.T) {
 	require.Eventually(t, func() bool { return h.pollGroup.Load() == nil }, waitFor, time.Millisecond)
 
 	srv.Restart()
-	require.Eventually(t, func() bool { return h.pollGroup.Load() != nil }, waitFor, time.Millisecond)
-
+	// the replacement pollgroup is published before onHealthy is called, so
+	// wait for the callback rather than for the group
+	require.Eventually(t, func() bool { return len(log.get()) == 3 }, waitFor, time.Millisecond)
 	assert.Equal(t, []string{"healthy", "unhealthy", "healthy"}, log.get())
+	assert.NotNil(t, h.pollGroup.Load())
 }
 
 func TestHost_AddressChange(t *testing.T) {

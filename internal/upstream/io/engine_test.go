@@ -77,7 +77,11 @@ func TestEngine_ConnectionClosedByServer(t *testing.T) {
 	require.Nil(t, r.resp)
 }
 
-func TestEngine_PipelinedRequestsKeepOrder(t *testing.T) {
+// TestEngine_PipelinedRepliesMatchRequests checks reply association: with
+// many requests pipelined over several sockets, every callback receives the
+// reply to its own request. Completion order across sockets is not checked
+// (and not guaranteed); each channel is awaited independently.
+func TestEngine_PipelinedRepliesMatchRequests(t *testing.T) {
 	srv := upstreamtest.NewServer(t)
 	const n = 500
 	for i := range n {
@@ -102,7 +106,8 @@ func TestEngine_PipelinedRequestsKeepOrder(t *testing.T) {
 	for i, ch := range chans {
 		r := await(t, ch)
 		require.NoError(t, r.err)
-		require.Equal(t, fmt.Sprintf("VALUE k%d 0 %d\r\nv%d\r\nEND\r\n", i, len(fmt.Sprint(i))+1, i), string(r.resp))
+		require.Equal(t, fmt.Sprintf("VALUE k%d 0 %d\r\nv%d\r\nEND\r\n", i, len(fmt.Sprint(i))+1, i), string(r.resp),
+			"request %d got another request's reply", i)
 	}
 
 	set, ch := newReq(ascii.SetCmd, "set x 0 0 3\r\nabc\r\n")
