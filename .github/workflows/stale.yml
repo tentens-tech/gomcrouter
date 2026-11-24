@@ -8,6 +8,7 @@ on:
 permissions:
   issues: write
   pull-requests: write
+  actions: write  # Required to save and restore the processing state between runs
 
 jobs:
   stale:

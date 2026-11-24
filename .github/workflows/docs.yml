@@ -6,12 +6,14 @@ on:
     paths:
       - '**.md'
       - '.markdownlint.json'
+      - '.lycheeignore'
       - '.github/workflows/docs.yml'
   pull_request:
     branches: [ main ]
     paths:
       - '**.md'
       - '.markdownlint.json'
+      - '.lycheeignore'
       - '.github/workflows/docs.yml'
 
 permissions:

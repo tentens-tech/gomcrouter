@@ -40,7 +40,7 @@ docker pull ghcr.io/tentens-tech/gomcrouter:latest
 
 # Binary
 VERSION=v1.3.4
-curl -fsSL https://github.com/tentens-tech/gomcrouter/releases/download/$VERSION/gomcrouter-$VERSION-linux-amd64.tar.gz | tar xz gomcrouter
+curl -fsSL https://github.com/tentens-tech/gomcrouter/releases/download/$VERSION/gomcrouter-$VERSION-linux-amd64.tar.gz | tar xz  # gomcrouter, LICENSE, README.md
 ./gomcrouter --version
 ```
 
