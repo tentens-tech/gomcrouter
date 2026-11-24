@@ -36,8 +36,9 @@ func AsyncRespondAndClose(conn gnet.Conn, st *types.ConnState, resp *types.ByteB
 	reply(conn, st, seq, types.Reply{Resp: resp, Close: true})
 }
 
-// A closing connection waits up to closeFlushTimeout for the client to read
-// the queued replies, checking every closeFlushRetry.
+// A closing connection waits for the client to read the queued replies,
+// checking every closeFlushRetry; it is closed anyway when the client reads
+// nothing for closeFlushTimeout.
 var (
 	closeFlushTimeout = int64(30 * stdtime.Second)
 	closeFlushRetry   = 5 * stdtime.Millisecond
@@ -109,12 +110,24 @@ func write(conn gnet.Conn, st *types.ConnState, r types.Reply) {
 // the socket accepts it, so a client reading slowly would lose the end of the
 // replies. The check runs on the event loop after the queued writes.
 func closeWhenFlushed(conn gnet.Conn, st *types.ConnState, deadline int64) {
+	waitFlushed(conn, st, deadline, -1)
+}
+
+// waitFlushed closes the connection once its outbound buffer is empty. The
+// deadline moves forward while the client reads (the buffer shrinks), so it
+// only cuts off a client that stopped reading.
+func waitFlushed(conn gnet.Conn, st *types.ConnState, deadline int64, last int) {
 	check := gnet.RunnableFunc(func(context.Context) error {
 		if st.Closed {
 			return nil
 		}
-		if conn.OutboundBuffered() > 0 && time.NanoTime() < deadline {
-			stdtime.AfterFunc(closeFlushRetry, func() { closeWhenFlushed(conn, st, deadline) })
+		buffered := conn.OutboundBuffered()
+		now := time.NanoTime()
+		if last >= 0 && buffered < last {
+			deadline = now + closeFlushTimeout
+		}
+		if buffered > 0 && now < deadline {
+			stdtime.AfterFunc(closeFlushRetry, func() { waitFlushed(conn, st, deadline, buffered) })
 			return nil
 		}
 		_ = conn.EventLoop().Close(conn)

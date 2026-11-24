@@ -15,7 +15,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
   in-flight requests. The router now closes the client connection itself, after the replies to the earlier requests
 - A malformed request closed the connection before the replies to the earlier pipelined requests were sent
 - Replies to a slow client were cut off when the connection was closed after `quit` or a malformed request; the
-  connection is now closed only once its replies are sent (or after 30 seconds)
+  connection is now closed only once its replies are sent, or when the client reads nothing for 30 seconds
 - SIGTERM (`docker stop`, Kubernetes) killed the router without a graceful shutdown; it's handled like SIGINT
 - `--log-level debug` had no effect
 - A storage command or a VALUE reply declaring a length close to the maximum integer crashed the router
