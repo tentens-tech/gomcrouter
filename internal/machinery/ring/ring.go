@@ -26,7 +26,7 @@ func NewMPSC[T any](size int) *MPSC[T] {
 	}
 
 	ring := &MPSC[T]{
-		mask: uint64(size - 1),
+		mask: uint64(size - 1), // #nosec G115 -- size is a positive power of 2
 		buf:  make([]mpscCell[T], size),
 	}
 	for i := 0; i < size; i++ {
@@ -42,7 +42,7 @@ func (r *MPSC[T]) Push(v T) bool {
 		pos := r.tail.Load()
 		cell := &r.buf[pos&r.mask]
 		seq := cell.seq.Load()
-		dif := int64(seq) - int64(pos)
+		dif := int64(seq) - int64(pos) // #nosec G115 -- wrap-around is intended, see the Vyukov MPSC queue
 
 		if dif == 0 {
 			if r.tail.CompareAndSwap(pos, pos+1) {

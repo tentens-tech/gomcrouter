@@ -8,116 +8,180 @@ on:
       - 'go.mod'
       - 'go.sum'
       - 'Dockerfile'
+      - '.dockerignore'
+      - 'Makefile'
       - '.golangci.yml'
+      - 'examples/**'
       - '.github/workflows/ci.yml'
+  # Every PR starts CI, so the "CI Result" check can be required by the branch
+  # ruleset (a required check that never runs blocks the merge). The jobs are
+  # skipped when a PR only changes documentation, see the changes job.
   pull_request:
     branches: [ main ]
-    paths:
-      - '**.go'
-      - 'go.mod'
-      - 'go.sum'
-      - 'Dockerfile'
-      - '.golangci.yml'
-      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
-  GO_VERSION: '1.25'
+  # Latest patch release of this Go version. go.mod only sets the minimum,
+  # building with it would ship the standard library vulnerabilities fixed since.
+  GO_VERSION: '1.27'
 
+# Default permissions for all jobs
 permissions:
   contents: read
 
 jobs:
+  # Decides whether the code jobs run: a PR that only changes documentation
+  # skips them. Pushes to main are already filtered by paths.
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.diff.outputs.code }}
+    steps:
+      - name: Checkout code
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check changed files
+        id: diff
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Documentation: Markdown files, images and the files that only configure docs and issues
+          DOCS='(\.md$|\.svg$|^LICENSE$|^\.github/ISSUE_TEMPLATE/|^\.github/PULL_REQUEST_TEMPLATE\.md$|^\.markdownlint\.json$|^\.lycheeignore$|^\.github/workflows/(docs|stale)\.yml$)'
+          # A failed diff must fail the job, not skip the checks. --no-renames lists
+          # both paths of a renamed file, so moving code to a docs path runs CI.
+          CHANGED=$(git diff --name-only --no-renames "$BASE_SHA...$HEAD_SHA")
+          CODE_FILES=$(echo "$CHANGED" | grep -Ev "$DOCS" || true)
+          if [ -n "$CODE_FILES" ]; then
+            echo "Code changes:"
+            echo "$CODE_FILES"
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Only documentation changed, skipping the code jobs"
+            echo "code=false" >> "$GITHUB_OUTPUT"
+          fi
+
   lint:
     name: Lint
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: read  # Required for only-new-issues
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ env.GO_VERSION }}
+          check-latest: true
 
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: latest
-          only-new-issues: true
+          # Show only new issues on PRs
+          only-new-issues: ${{ github.event_name == 'pull_request' }}
           problem-matchers: true
 
-      - name: Generate lint report summary
-        if: always()
+      - name: Check formatting and go.mod
         run: |
-          echo "## 🔍 Lint Results" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Lint check completed - see annotations in Files Changed tab" >> $GITHUB_STEP_SUMMARY
+          UNFORMATTED=$(git ls-files -z '*.go' | xargs -0 gofmt -l)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "::error::Files are not gofmt-ed:"; echo "$UNFORMATTED"; exit 1
+          fi
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum || { echo "::error::go.mod/go.sum are not tidy, run 'go mod tidy'"; exit 1; }
+
+      - name: Run shellcheck
+        run: shellcheck examples/docker/*.sh
 
   test:
     name: Test
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      checks: write
+      checks: write  # Required for test report annotations
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ env.GO_VERSION }}
-
-      - name: Download dependencies
-        run: go mod download
+          check-latest: true
 
       - name: Install gotestsum
         run: go install gotest.tools/gotestsum@latest
 
       - name: Run tests with JUnit output
-        run: |
-          gotestsum --junitfile junit.xml --format testdox -- \
-            -race -coverprofile=coverage.out -covermode=atomic ./...
+        run: gotestsum --junitfile junit.xml --format testdox -- -race -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Generate test summary
         if: always()
         run: |
-          echo "## 🧪 Test Results" >> $GITHUB_STEP_SUMMARY
-          if [ -f junit.xml ]; then
-            TESTS=$(grep -o 'tests="[0-9]*"' junit.xml | head -1 | grep -o '[0-9]*')
-            FAILURES=$(grep -o 'failures="[0-9]*"' junit.xml | head -1 | grep -o '[0-9]*')
-            ERRORS=$(grep -o 'errors="[0-9]*"' junit.xml | head -1 | grep -o '[0-9]*')
-            TIME=$(grep -o 'time="[0-9.]*"' junit.xml | head -1 | grep -o '[0-9.]*')
-            echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
-            echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-            echo "| Total Tests | ${TESTS:-0} |" >> $GITHUB_STEP_SUMMARY
-            echo "| Passed | $((${TESTS:-0} - ${FAILURES:-0} - ${ERRORS:-0})) |" >> $GITHUB_STEP_SUMMARY
-            echo "| Failed | ${FAILURES:-0} |" >> $GITHUB_STEP_SUMMARY
-            echo "| Errors | ${ERRORS:-0} |" >> $GITHUB_STEP_SUMMARY
-            echo "| Duration | ${TIME:-0}s |" >> $GITHUB_STEP_SUMMARY
-          fi
+          {
+            echo "## 🧪 Test Results"
+            if [ -f junit.xml ]; then
+              TESTS=$(grep -o 'tests="[0-9]*"' junit.xml | head -1 | grep -o '[0-9]*')
+              FAILURES=$(grep -o 'failures="[0-9]*"' junit.xml | head -1 | grep -o '[0-9]*')
+              ERRORS=$(grep -o 'errors="[0-9]*"' junit.xml | head -1 | grep -o '[0-9]*')
+              TIME=$(grep -o 'time="[0-9.]*"' junit.xml | head -1 | grep -o '[0-9.]*')
+              echo "| Metric | Value |"
+              echo "|--------|-------|"
+              echo "| Total Tests | ${TESTS:-0} |"
+              echo "| Passed | $((${TESTS:-0} - ${FAILURES:-0} - ${ERRORS:-0})) |"
+              echo "| Failed | ${FAILURES:-0} |"
+              echo "| Errors | ${ERRORS:-0} |"
+              echo "| Duration | ${TIME:-0}s |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Generate coverage summary
         if: always()
         run: |
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "## 📊 Coverage Report" >> $GITHUB_STEP_SUMMARY
-          if [ -f coverage.out ]; then
-            COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}')
-            echo "**Total Coverage: ${COVERAGE}**" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo "<details><summary>Coverage by package</summary>" >> $GITHUB_STEP_SUMMARY
-            echo "" >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            go tool cover -func=coverage.out | head -30 >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            echo "</details>" >> $GITHUB_STEP_SUMMARY
-          fi
+          {
+            echo ""
+            echo "## 📊 Coverage Report"
+            if [ -f coverage.out ]; then
+              COVERAGE=$(go tool cover -func=coverage.out | grep total | awk '{print $3}')
+              echo "**Total Coverage: ${COVERAGE}**"
+              echo ""
+              echo "<details><summary>Least covered functions</summary>"
+              echo ""
+              echo '```'
+              go tool cover -func=coverage.out | grep -v '^total:' | sort -k3 -n | head -40
+              echo '```'
+              echo "</details>"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload test results
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: test-results
@@ -127,8 +191,9 @@ jobs:
           retention-days: 30
 
       - name: Test Report
-        uses: dorny/test-reporter@v3
-        if: always()
+        uses: dorny/test-reporter@d1b5dff021aa968b288b02285a8bf47471c5928a # v3.2.0
+        # Forks don't get checks: write
+        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
         with:
           name: Go Tests
           path: junit.xml
@@ -136,96 +201,155 @@ jobs:
           fail-on-error: false
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
         with:
           files: ./coverage.out
           fail_ci_if_error: false
-          verbose: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   build:
-    name: Build
+    name: Build (${{ matrix.goarch }})
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goarch: [ amd64, arm64 ]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ env.GO_VERSION }}
-
-      - name: Get version info
-        id: version
-        run: |
-          VERSION="dev-$(git rev-parse --short HEAD)"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          check-latest: true
 
       - name: Build binary
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
         run: |
-          go build -ldflags "-X github.com/tentens-tech/gomcrouter/version.Version=${{ steps.version.outputs.version }}" \
-            -o bin/gomcrouter .
+          VERSION="dev-$(git rev-parse --short HEAD)"
+          go build -trimpath -ldflags "-s -w -X 'github.com/tentens-tech/gomcrouter/version.Version=${VERSION}'" -o bin/gomcrouter .
+          {
+            echo "## 🔨 Build linux/${GOARCH}"
+            echo "| Property | Value |"
+            echo "|----------|-------|"
+            echo "| Version | ${VERSION} |"
+            echo "| Binary Size | $(du -h bin/gomcrouter | cut -f1) |"
+            echo "| Go Version | $(go env GOVERSION) |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify binary
-        run: |
-          ls -la bin/
-          ./bin/gomcrouter --help || true
-
-      - name: Generate build summary
-        run: |
-          echo "## 🔨 Build Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Version | ${{ steps.version.outputs.version }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Binary Size | $(du -h bin/gomcrouter | cut -f1) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Go Version | ${{ env.GO_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+        if: matrix.goarch == 'amd64'
+        run: ./bin/gomcrouter --version
 
       - name: Upload binary artifact
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: gomcrouter-binary-linux-amd64
+          name: gomcrouter-linux-${{ matrix.goarch }}
           path: bin/gomcrouter
           retention-days: 7
 
   docker-build:
     name: Docker Build
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - name: Build Docker image (no push)
-        uses: docker/build-push-action@v7
+      - name: Build Docker image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: Dockerfile
           push: false
+          load: true
           tags: gomcrouter:ci
+          build-args: |
+            VERSION=dev-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Verify image
+        run: |
+          docker run --rm gomcrouter:ci /bin/gomcrouter --version
+          test "$(docker run --rm gomcrouter:ci id -u)" = 10001
+
+  e2e:
+    name: End-to-end Tests
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: examples/docker
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Start the docker-compose example
+        run: docker compose up --build --detach --wait
+
+      - name: Run e2e test
+        run: ./test.sh
+
+      - name: Collect logs
+        if: failure()
+        run: docker compose logs --no-color > e2e.log 2>&1 || true
+
+      - name: Upload e2e logs
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-logs
+          path: examples/docker/e2e.log
+          retention-days: 7
+
+      - name: Stop the docker-compose example
+        if: always()
+        run: docker compose down --volumes
+
   security-scan:
     name: Security Scan
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
+      security-events: write  # Required for uploading SARIF results
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+
+      - name: Run govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -233,37 +357,55 @@ jobs:
           exit-code: '0'
           format: 'table'
 
-      - name: Install gosec
-        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
-
       - name: Run gosec security scanner
         run: |
+          go install github.com/securego/gosec/v2/cmd/gosec@latest
           gosec -no-fail -fmt text ./...
           gosec -no-fail -fmt sarif -out results.sarif ./...
 
       - name: Generate security summary
         if: always()
         run: |
-          echo "## 🔒 Security Scan Results" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Trivy (Vulnerability Scanner)" >> $GITHUB_STEP_SUMMARY
-          echo "Scanned for CRITICAL and HIGH severity vulnerabilities." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Gosec (Go Security Checker)" >> $GITHUB_STEP_SUMMARY
-          if [ -f results.sarif ]; then
-            ISSUES=$(jq '.runs[0].results | length' results.sarif 2>/dev/null || echo "0")
-            if [ "$ISSUES" -gt 0 ]; then
-              echo "⚠️ Found ${ISSUES} potential security issue(s)" >> $GITHUB_STEP_SUMMARY
-            else
-              echo "✅ No security issues found" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## 🔒 Security Scan Results"
+            echo ""
+            echo "- govulncheck: known vulnerabilities in reachable code fail the job"
+            echo "- Trivy: CRITICAL and HIGH vulnerabilities in dependencies"
+            if [ -f results.sarif ]; then
+              ISSUES=$(jq '.runs[0].results | length' results.sarif 2>/dev/null || echo "0")
+              if [ "$ISSUES" -gt 0 ]; then
+                echo "- gosec: ⚠️ ${ISSUES} potential issue(s)"
+              else
+                echo "- gosec: ✅ no issues"
+              fi
             fi
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "_Results uploaded to GitHub Security tab (if enabled)_" >> $GITHUB_STEP_SUMMARY
+          } >> "$GITHUB_STEP_SUMMARY"
 
+      # Upload SARIF to GitHub Code Scanning (only works if Code Scanning is enabled)
       - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
+        # Only run on push to main or PRs from the same repo (not forks)
         if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
-        continue-on-error: true
+        continue-on-error: true  # Don't fail the build if Code Scanning is not enabled
         with:
           sarif_file: results.sarif
+
+  # The single check to require in the branch ruleset: it passes when every job
+  # passed or was skipped because the PR only changes documentation.
+  ci-result:
+    name: CI Result
+    needs: [changes, lint, test, build, docker-build, e2e, security-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check job results
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $RESULTS"
+          for r in $RESULTS; do
+            if [ "$r" != "success" ] && [ "$r" != "skipped" ]; then
+              echo "::error::A CI job finished with result: $r"
+              exit 1
+            fi
+          done

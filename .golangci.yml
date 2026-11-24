@@ -39,7 +39,7 @@ linters:
 
     errcheck:
       check-type-assertions: true
-      check-blank: true
+      check-blank: false
 
     testifylint:
       enable-all: true

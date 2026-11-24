@@ -35,4 +35,28 @@ Please include:
 - Fixes are released as patch versions and credited in `CHANGELOG.md` if the
   reporter wishes to be named.
 
+## Security Considerations
+
+### Network exposure
+
+- The memcached text protocol has no authentication or encryption. Anyone who can reach the router listen address
+  (`--listen`, default `tcp://:8080`) can read, write and delete keys on every upstream. Expose it only inside a
+  trusted network and restrict access with firewall rules or Kubernetes network policies.
+- The metrics endpoint (`--metrics-listen-addr`, default `:9090`) is served without authentication and exposes
+  upstream host names and traffic counters. Bind it to an internal interface when it isn't scraped from outside.
+- Traffic to the upstream memcached nodes isn't encrypted either; keep them on a private network.
+
+### Runtime
+
+- The image runs as an unprivileged user (UID/GID `10001`), the binary is owned by root and read-only, and
+  gomcrouter doesn't write to disk, so it works with `readOnlyRootFilesystem: true`,
+  `allowPrivilegeEscalation: false` and all capabilities dropped.
+- The router configuration file is trusted input: keep it read-only for the process.
+
+### For contributors
+
+- Dependabot keeps Go modules, GitHub Actions (pinned to commit SHAs) and Docker base images up to date.
+- CI runs golangci-lint, gosec, govulncheck and Trivy on every code change; govulncheck fails the build when
+  reachable code is affected by a known vulnerability.
+
 Thank you for helping keep `gomcrouter` and its users safe.
