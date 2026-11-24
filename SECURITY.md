@@ -18,7 +18,7 @@ We accept private reports through two channels:
 
 1. **GitHub Security Advisories (preferred)** — open a private report at
    <https://github.com/tentens-tech/gomcrouter/security/advisories/new>.
-2. **Email** — `slava.lucheninov@tentens.tech`.
+2. **Email** — Slava L, `slucheninov@gmail.com`.
 
 Please include:
 

@@ -12,7 +12,7 @@ The full text is available at:
 If you experience or witness behavior that violates this Code of Conduct,
 please report it privately to the maintainers at:
 
-**`slava.lucheninov@tentens.tech`**
+**Slava L** — `slucheninov@gmail.com`
 
 All reports will be reviewed and investigated promptly and fairly. Maintainers
 are obligated to respect the privacy and safety of the reporter.
