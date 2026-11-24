@@ -99,12 +99,15 @@ func (e *Engine) eventLoop() {
 	for e.open.Load() {
 		sleepMsec := -1
 		for i := 0; i < len(e.pollGroups); i++ {
-			if !e.pollGroups[i].IsActive() {
+			// dispatch may disenroll the pollgroup (failure hooks), which
+			// shifts e.pollGroups: keep using the same group
+			pg := e.pollGroups[i]
+			if !pg.IsActive() {
 				continue
 			}
 
-			e.pollGroups[i].dispatch()
-			sleepMsec = e.pollGroups[i].capSleep(sleepMsec)
+			pg.dispatch()
+			sleepMsec = pg.capSleep(sleepMsec)
 		}
 
 		err := e.poller.Poll(sleepMsec)

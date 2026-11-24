@@ -65,6 +65,8 @@ has_log() { logs | grep -qF -- "$1"; }
 running() { [ "$(docker inspect -f '{{.State.Running}}' "$CUR" 2>/dev/null)" = true ]; }
 stopped() { ! running; }
 exit_code() { [ "$(docker inspect -f '{{.State.ExitCode}}' "$CUR")" = "$1" ]; }
+# miss <1|2> <key>: the key isn't on the memcached node
+miss()    { expect 'END\r\n' direct "$1" "get $2\r\n"; }
 # key <name>: a key unique for the run
 key()     { echo "e2e-$SUITE-$1-$RUN"; }
 # set_via <command> <key> <value>: store a value with the command (set, add, ...)
@@ -262,7 +264,7 @@ suite_routes() {
   check "MissFailoverRoute: a hit on memcache1 wins" has "m1" mc "get $k\r\n"
   check "MissFailoverRoute: miss on all hosts" expect 'END\r\n' mc "get $(key none)\r\n"
   check "MissFailoverRoute: set goes to memcache1 only" eval \
-    'store "$k-s" s >/dev/null; direct 1 "get $k-s\r\n" | grep -q VALUE && direct 2 "get $k-s\r\n" | grep -qx "END\r"'
+    'store "$k-s" s >/dev/null; direct 1 "get $k-s\r\n" | grep -q VALUE && miss 2 "$k-s"'
   finish
 
   start local test/e2e/configs/local.yaml
@@ -277,14 +279,14 @@ suite_routes() {
   waitcheck "unknown route type: ready" 15 healthy 2
   flush; k=$(key unknown)
   check "unknown route type: falls back to DefaultRoute" eval \
-    'store "$k" u >/dev/null; direct 1 "get $k\r\n" | grep -q VALUE && direct 2 "get $k\r\n" | grep -qx "END\r"'
+    'store "$k" u >/dev/null; direct 1 "get $k\r\n" | grep -q VALUE && miss 2 "$k"'
   finish
 
   start selector-default test/e2e/configs/selector-default.yaml
   waitcheck "OperationSelectorRoute without policies: ready" 15 healthy 2
   flush; k=$(key selector-default)
   check "OperationSelectorRoute without policies: DefaultRoute for every command" eval \
-    'store "$k" s >/dev/null; direct 1 "get $k\r\n" | grep -q VALUE && direct 2 "get $k\r\n" | grep -qx "END\r"'
+    'store "$k" s >/dev/null; direct 1 "get $k\r\n" | grep -q VALUE && miss 2 "$k"'
   check "OperationSelectorRoute without policies: version is proxied" has "VERSION 1." mc 'version\r\n'
   finish
 
@@ -310,7 +312,7 @@ suite_example() {
     'mc "set $k-n 0 0 1\r\n1\r\n" >/dev/null; mc "incr $k-n 4\r\n" | grep -q 5 && direct 2 "get $k-n\r\n" | grep -q "^5"'
   check "touch has no policy: DefaultRoute" expect 'TOUCHED\r\n' mc "touch $k 100\r\n"
   check "delete fans out (AllFastestRoute)" eval \
-    'mc "delete $k\r\n" | grep -q DELETED && direct 1 "get $k\r\n" | grep -qx "END\r" && direct 2 "get $k\r\n" | grep -qx "END\r"'
+    'mc "delete $k\r\n" | grep -q DELETED && miss 1 "$k" && miss 2 "$k"'
   finish
 }
 
