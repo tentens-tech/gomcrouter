@@ -190,7 +190,7 @@ func (p *PollGroup) dispatchOnSocket(s *socket.Socket) {
 			return
 		}
 
-		in := pool.InflightRequestPool.Get().(*types.InflightRequest)
+		in := pool.InflightRequestPool.Get().(*types.InflightRequest) //nolint:errcheck // the pool only holds *types.InflightRequest
 		in.Request = req
 		in.Ts = now
 		in.Status = types.InflightRequestStatus

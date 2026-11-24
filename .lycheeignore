@@ -1,0 +1,7 @@
+# Badges and pages of workflows that only exist after they are merged to main
+https://github.com/tentens-tech/gomcrouter/actions/workflows/.*
+# Badge images: an external service that sometimes times out
+https://img.shields.io/.*
+# Local endpoints in examples
+http://localhost.*
+http://127.0.0.1.*

@@ -1,10 +1,14 @@
 version: 2
 updates:
+  # Go module dependencies
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
+      day: "monday"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps"
     labels:
       - "dependencies"
       - "go"
@@ -16,11 +20,15 @@ updates:
           - "minor"
           - "patch"
 
+  # GitHub Actions
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
     open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
     labels:
       - "dependencies"
       - "github-actions"
@@ -32,11 +40,15 @@ updates:
           - "minor"
           - "patch"
 
+  # Docker base images
   - package-ecosystem: "docker"
     directory: "/"
     schedule:
       interval: "weekly"
+      day: "monday"
     open-pull-requests-limit: 3
+    commit-message:
+      prefix: "docker"
     labels:
       - "dependencies"
       - "docker"

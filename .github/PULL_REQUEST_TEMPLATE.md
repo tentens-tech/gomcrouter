@@ -49,8 +49,9 @@ Write "N/A" only if the change does not affect a hot path.
 
 - [ ] Tests added or updated
 - [ ] Edge cases covered
-- [ ] Linter passes (`golangci-lint run`)
-- [ ] Tests pass with race detector (`go test -race ./...`)
+- [ ] Linter passes (`make lint`)
+- [ ] Tests pass with race detector (`make test-race`)
+- [ ] End-to-end test passes (`make e2e`) for routing, upstream or IO changes
 - [ ] Benchmarks included for hot-path changes
 - [ ] Docs updated (`README.md`, `CHANGELOG.md` under `Unreleased`)
 - [ ] No new allocations on hot paths (or justified)

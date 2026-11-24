@@ -10,17 +10,17 @@ on:
         required: false
         type: string
       force:
-        description: 'Force overwrite existing release'
+        description: 'Overwrite an existing release'
         required: false
         type: boolean
-        default: true
+        default: false
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 env:
-  GO_VERSION: '1.25'
+  # Latest patch release of this Go version, see ci.yml
+  GO_VERSION: '1.27'
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
@@ -28,60 +28,60 @@ jobs:
   setup:
     name: Setup Release
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
-      should_release: ${{ steps.resolve.outputs.should_release }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Resolve tag
         id: resolve
+        env:
+          EVENT: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
         run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            TAG="${{ github.ref_name }}"
-          elif [ -n "${{ inputs.tag }}" ]; then
-            TAG="${{ inputs.tag }}"
+          if [ "$EVENT" = "push" ]; then
+            TAG="$REF_NAME"
+          elif [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
           else
-            TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+            TAG=$(git tag --list 'v*' --sort=-version:refname | head -1)
             if [ -z "$TAG" ]; then
               echo "::error::No tag found. Please specify a tag or create one first."
               exit 1
             fi
           fi
-          echo "Resolved tag: $TAG"
-          if ! git rev-parse "refs/tags/$TAG" >/dev/null 2>&1; then
-            echo "::error::Tag $TAG does not exist. Create it first: git tag $TAG && git push origin $TAG"
+          if ! echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::Tag '$TAG' doesn't look like vX.Y.Z"
             exit 1
           fi
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "should_release=true" >> $GITHUB_OUTPUT
+          if ! git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::Tag $TAG doesn't exist"
+            exit 1
+          fi
+          echo "Resolved tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          case "$TAG" in *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;; *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;; esac
 
       - name: Check existing release
-        id: check
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+          FORCE: ${{ inputs.force }}
+        # Only a check: with force, the existing release is replaced in the
+        # release job, after the tests, binaries and images succeeded.
         run: |
-          TAG="${{ steps.resolve.outputs.tag }}"
-          if gh release view "$TAG" &>/dev/null; then
-            echo "Release $TAG already exists"
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "Release $TAG does not exist"
-            echo "exists=false" >> $GITHUB_OUTPUT
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" &>/dev/null && [ "$FORCE" != "true" ]; then
+            echo "::error::Release $TAG already exists, run the workflow with force to overwrite it"
+            exit 1
           fi
-
-      - name: Delete existing release (if force)
-        if: steps.check.outputs.exists == 'true' && (github.event_name == 'workflow_dispatch' && inputs.force || github.event_name == 'push')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG="${{ steps.resolve.outputs.tag }}"
-          echo "Deleting existing release $TAG..."
-          gh release delete "$TAG" --yes || true
-          echo "Existing release deleted"
 
   test:
     name: Test
@@ -89,151 +89,124 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.setup.outputs.tag }}
+          persist-credentials: false
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ env.GO_VERSION }}
+          check-latest: true
 
       - name: Run tests
         run: go test -race ./...
 
-  build-binaries:
-    name: Binary ${{ matrix.goos }}-${{ matrix.goarch }}
+  binaries:
+    name: Binaries
     needs: [setup, test]
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goos: [linux]
-        goarch: [amd64, arm64]
     env:
       RELEASE_TAG: ${{ needs.setup.outputs.tag }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.setup.outputs.tag }}
+          persist-credentials: false
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: ${{ env.GO_VERSION }}
+          check-latest: true
 
-      - name: Build binary
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: 0
+      - name: Build binaries
         run: |
-          mkdir -p dist/pkg
-          go build -trimpath \
-            -ldflags "-s -w -X github.com/tentens-tech/gomcrouter/version.Version=${RELEASE_TAG}" \
-            -o dist/pkg/gomcrouter .
-          cp LICENSE README.md dist/pkg/ 2>/dev/null || true
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            name="gomcrouter-${RELEASE_TAG}-linux-${arch}"
+            mkdir -p "build/$name"
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
+              -ldflags "-s -w -X 'github.com/tentens-tech/gomcrouter/version.Version=${RELEASE_TAG}'" \
+              -o "build/$name/gomcrouter" .
+            cp LICENSE README.md "build/$name/"
+            tar -C "build/$name" -czf "dist/$name.tar.gz" gomcrouter LICENSE README.md
+          done
+          ls -la dist/
 
-      - name: Package binary
-        working-directory: dist
-        run: |
-          ARCHIVE="gomcrouter-${RELEASE_TAG}-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz"
-          tar -czf "$ARCHIVE" -C pkg .
-          sha256sum "$ARCHIVE" > "$ARCHIVE.sha256"
-          rm -rf pkg
-          ls -la
-
-      - name: Upload binary artifact
-        uses: actions/upload-artifact@v7
+      - name: Upload binaries
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/*
-          retention-days: 7
+          name: binaries
+          path: dist/
 
-  build-docker-amd64:
-    name: Docker amd64
+  # Every image is built on a native runner, so the RUN steps of the final
+  # stage don't need emulation.
+  build-docker:
+    name: Docker ${{ matrix.arch }}
     needs: [setup, test]
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
     env:
       RELEASE_TAG: ${{ needs.setup.outputs.tag }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.setup.outputs.tag }}
-          fetch-depth: 0
+          persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push amd64
-        uses: docker/build-push-action@v7
+      - name: Build and push ${{ matrix.arch }}
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           file: Dockerfile
-          platforms: linux/amd64
+          platforms: linux/${{ matrix.arch }}
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_TAG }}-amd64
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_TAG }}-${{ matrix.arch }}
           build-args: |
             VERSION=${{ env.RELEASE_TAG }}
-          cache-from: type=gha,scope=amd64
-          cache-to: type=gha,mode=max,scope=amd64
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
 
-  build-docker-arm64:
-    name: Docker arm64
-    needs: [setup, test]
-    runs-on: ubuntu-24.04-arm
-    env:
-      RELEASE_TAG: ${{ needs.setup.outputs.tag }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.setup.outputs.tag }}
-          fetch-depth: 0
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Login to GitHub Container Registry
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push arm64
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: Dockerfile
-          platforms: linux/arm64
-          push: true
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ env.RELEASE_TAG }}-arm64
-          build-args: |
-            VERSION=${{ env.RELEASE_TAG }}
-          cache-from: type=gha,scope=arm64
-          cache-to: type=gha,mode=max,scope=arm64
-
+  # Create multi-arch manifest
   docker-manifest:
     name: Docker Manifest
-    needs: [setup, build-docker-amd64, build-docker-arm64]
+    needs: [setup, build-docker]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     env:
       RELEASE_TAG: ${{ needs.setup.outputs.tag }}
+      PRERELEASE: ${{ needs.setup.outputs.prerelease }}
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -241,50 +214,65 @@ jobs:
 
       - name: Create and push version manifest
         run: |
-          echo "Creating manifest for: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$RELEASE_TAG"
-          docker buildx imagetools create -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$RELEASE_TAG \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$RELEASE_TAG-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$RELEASE_TAG-arm64
+          IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          docker buildx imagetools create -t "$IMAGE:$RELEASE_TAG" "$IMAGE:$RELEASE_TAG-amd64" "$IMAGE:$RELEASE_TAG-arm64"
 
       - name: Create and push latest manifest
+        if: env.PRERELEASE != 'true'
         run: |
-          echo "Creating manifest for: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
-          docker buildx imagetools create -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$RELEASE_TAG-amd64 \
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$RELEASE_TAG-arm64
+          IMAGE=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          docker buildx imagetools create -t "$IMAGE:latest" "$IMAGE:$RELEASE_TAG-amd64" "$IMAGE:$RELEASE_TAG-arm64"
 
   release:
     name: Create Release
-    needs: [setup, docker-manifest, build-binaries]
+    needs: [setup, binaries, docker-manifest]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       RELEASE_TAG: ${{ needs.setup.outputs.tag }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.setup.outputs.tag }}
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Download binary artifacts
-        uses: actions/download-artifact@v8
+      - name: Download binaries
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          pattern: binary-*
-          path: binaries
-          merge-multiple: true
+          name: binaries
+          path: release
 
-      - name: Generate combined checksums
-        working-directory: binaries
+      - name: Generate checksums
+        working-directory: release
         run: |
-          ls -la
-          # drop per-artifact checksum files, make a single aggregate one
-          rm -f *.sha256
-          sha256sum *.tar.gz > checksums.txt
+          sha256sum -- *.tar.gz > checksums.txt
           cat checksums.txt
 
-      - name: Generate release notes
+      - name: Delete existing release (force)
+        if: inputs.force
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -E "^v[0-9]+\.[0-9]+\.[0-9]+" | grep -vx "$RELEASE_TAG" | head -1 || echo "")
+          if gh release view "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" &>/dev/null; then
+            echo "Deleting existing release $RELEASE_TAG"
+            gh release delete "$RELEASE_TAG" -R "$GITHUB_REPOSITORY" --yes
+          fi
+
+      - name: Generate release notes
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          # The newest v* tag that is an ancestor of this release; empty for the first release.
+          PREVIOUS_TAG=""
+          for t in $(git tag --list 'v*' --sort=-version:refname); do
+            if [ "$t" != "$RELEASE_TAG" ] && git merge-base --is-ancestor "$t" "$RELEASE_TAG"; then
+              PREVIOUS_TAG=$t
+              break
+            fi
+          done
 
           cat > release_notes.md << NOTES
           A high-performance memcached router written in Go.
@@ -292,68 +280,65 @@ jobs:
           ### 📦 Docker Image
 
           \`\`\`bash
-          docker pull ghcr.io/${{ github.repository }}:$RELEASE_TAG
+          docker pull ghcr.io/$REPO:$RELEASE_TAG
           \`\`\`
 
           Supported architectures: \`linux/amd64\`, \`linux/arm64\`.
 
-          ### 📥 Binaries
-
-          Prebuilt static binaries (CGO disabled) are attached to this release:
-
-          - \`gomcrouter-$RELEASE_TAG-linux-amd64.tar.gz\`
-          - \`gomcrouter-$RELEASE_TAG-linux-arm64.tar.gz\`
-          - \`checksums.txt\` (SHA-256)
+          ### ⬇️ Binary
 
           \`\`\`bash
-          curl -L -o gomcrouter.tar.gz \\
-            https://github.com/${{ github.repository }}/releases/download/$RELEASE_TAG/gomcrouter-$RELEASE_TAG-linux-amd64.tar.gz
-          tar -xzf gomcrouter.tar.gz
-          ./gomcrouter --help
+          curl -fsSL https://github.com/$REPO/releases/download/$RELEASE_TAG/gomcrouter-$RELEASE_TAG-linux-amd64.tar.gz | tar xz gomcrouter
+          ./gomcrouter --version
           \`\`\`
+
+          Static binaries (CGO disabled) for linux/amd64 and linux/arm64 and their \`checksums.txt\` are attached below.
 
           ### 🚀 Quick Start
 
           \`\`\`bash
           docker run --rm -p 8080:8080 -p 9090:9090 \\
-            -v \$(pwd)/gomcrouter.yaml:/gomcrouter.yaml \\
-            ghcr.io/${{ github.repository }}:$RELEASE_TAG \\
+            -v \$(pwd)/gomcrouter.yaml:/gomcrouter.yaml:ro \\
+            ghcr.io/$REPO:$RELEASE_TAG \\
             /bin/gomcrouter -f /gomcrouter.yaml
           \`\`\`
 
-          See \`examples/docker/\` in the repository for a full docker-compose
-          setup with two memcached nodes, a writer, and a metrics watcher.
+          See [examples/docker](https://github.com/$REPO/tree/$RELEASE_TAG/examples/docker) for a full docker-compose
+          setup with two memcached nodes, a writer and a metrics watcher.
 
           ### 🔧 What's Changed
 
           NOTES
 
-          if [ -n "$PREVIOUS_TAG" ] && [ "$PREVIOUS_TAG" != "$RELEASE_TAG" ]; then
-            echo "Changes since $PREVIOUS_TAG:" >> release_notes.md
-            echo "" >> release_notes.md
-            git log --pretty=format:"- %s (%h)" $PREVIOUS_TAG..$RELEASE_TAG --no-merges >> release_notes.md
-          else
-            echo "Initial release" >> release_notes.md
-          fi
+          {
+            if [ -n "$PREVIOUS_TAG" ]; then
+              echo "Changes since $PREVIOUS_TAG:"
+              echo ""
+              git log --pretty=format:"- %s (%h)" "$PREVIOUS_TAG..$RELEASE_TAG" --no-merges
+              echo ""
+            else
+              echo "Initial release"
+            fi
+          } >> release_notes.md
 
           cat >> release_notes.md << NOTES
 
           ### 📚 Documentation
 
-          - [README](https://github.com/${{ github.repository }}#readme)
-          - [Benchmarks](https://github.com/${{ github.repository }}/blob/main/BENCHMARKS.md)
-          - [Changelog](https://github.com/${{ github.repository }}/blob/main/CHANGELOG.md)
-
+          - [README](https://github.com/$REPO/blob/$RELEASE_TAG/README.md)
+          - [Benchmarks](https://github.com/$REPO/blob/$RELEASE_TAG/BENCHMARKS.md)
+          - [Changelog](https://github.com/$REPO/blob/$RELEASE_TAG/CHANGELOG.md)
           NOTES
 
+          cat release_notes.md
+
       - name: Create Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           name: gomcrouter ${{ env.RELEASE_TAG }}
           body_path: release_notes.md
           files: |
-            binaries/*.tar.gz
-            binaries/checksums.txt
+            release/*
           draft: false
-          prerelease: ${{ contains(env.RELEASE_TAG, '-') }}
+          prerelease: ${{ needs.setup.outputs.prerelease == 'true' }}

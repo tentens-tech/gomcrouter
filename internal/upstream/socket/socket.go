@@ -66,7 +66,7 @@ func sockAddrFromAddrPort(addr string) (unix.Sockaddr, int, error) {
 	if ta.Zone != "" {
 		ifi, _ := net.InterfaceByName(ta.Zone)
 		if ifi != nil {
-			zoneID = uint32(ifi.Index)
+			zoneID = uint32(ifi.Index) // #nosec G115 -- interface indexes are small positive numbers
 		}
 	}
 	return &unix.SockaddrInet6{Port: ta.Port, Addr: a6, ZoneId: zoneID}, unix.AF_INET6, nil
@@ -74,7 +74,7 @@ func sockAddrFromAddrPort(addr string) (unix.Sockaddr, int, error) {
 
 func waitConnect(fd int, timeoutMs int) error {
 	pfds := []unix.PollFd{{
-		Fd:     int32(fd),
+		Fd:     int32(fd), // #nosec G115 -- file descriptors fit in int32
 		Events: unix.POLLOUT | unix.POLLERR | unix.POLLHUP,
 	}}
 

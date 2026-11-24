@@ -1,11 +1,13 @@
 # Contributing to gomcrouter
 
-Thanks for your interest in contributing to **gomcrouter** 🚀  
+Thanks for your interest in contributing to **gomcrouter** 🚀
 This project is a high-performance Memcached protocol router focused on low latency, high throughput, and minimal allocations. Please read this guide before submitting changes.
+
+This project and everyone participating in it is governed by our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ---
 
-# Philosophy
+## Philosophy
 
 gomcrouter is performance-first and correctness-first.
 
@@ -21,23 +23,23 @@ If a change affects routing, parsing, IO, pools, or upstream — it must include
 
 ---
 
-# Where to Start
+## Where to Start
 
 We especially welcome contributors in these areas:
 
-## ✅ Contribution Tracks
+### ✅ Contribution Tracks
 
-### 1. Protocol Track — Meta + Binary Protocol Support
+#### 1. Protocol Track — Meta + Binary Protocol Support
 
 Goal: Add support for Memcached Meta and Binary protocols.
 
 Start here:
 
-- `proto/` package
-- Existing ASCII protocol implementation as reference
+- `internal/proto/` package
+- Existing ASCII protocol implementation (`internal/proto/ascii`) as reference
 - Add new packages:
-    - `proto/meta`
-    - `proto/binary`
+  - `internal/proto/meta`
+  - `internal/proto/binary`
 
 Guidelines:
 
@@ -54,13 +56,13 @@ PR must include:
 
 Do not modify event loop code for first protocol PR — parser first, integration later.
 
-### 2. Routing Track — New Route Implementations
+#### 2. Routing Track — New Route Implementations
 
 Goal: Add new routing strategies.
 
 Start here:
 
-- `router/` and `router/handlers/` package
+- `internal/router/` and `internal/router/handlers/` packages
 
 Examples:
 
@@ -86,35 +88,38 @@ Avoid modifying core router engine for first PR — add new route type first.
 
 ---
 
-# Development Setup
+## Development Setup
 
 Requirements:
 
-- Go (see go.mod for version)
-- Docker (for integration tests)
+- Go (the version from [go.mod](go.mod); CI builds with the latest Go 1.27 release)
+- Docker (for the image and the end-to-end test)
+- [golangci-lint](https://golangci-lint.run/) v2
 - memtier_benchmark (for load testing)
+- Optional: [pre-commit](https://pre-commit.com/) — `pre-commit install`
 
-Build:
-
-```bash
-go build -o gomcrouter .
-```
-
-Run tests:
+`make help` lists all targets:
 
 ```bash
-go test ./...
+make build        # build ./gomcrouter with the version from git describe
+make test-race    # unit tests with the race detector
+make cover        # unit tests with coverage, writes coverage.out
+make lint         # golangci-lint
+make vuln         # govulncheck
+make sec          # gosec
+make e2e          # docker-compose example + examples/docker/test.sh
+make docker-build # build the image
 ```
 
 Run benchmarks:
 
 ```bash
-go test -bench . -benchmem ./...
+go test -run '^$' -bench . -benchmem ./...
 ```
 
 ---
 
-# Code Style
+## Code Style
 
 - Always check your code with linter
 - Keep functions small and explicit
@@ -124,7 +129,7 @@ go test -bench . -benchmem ./...
 
 ---
 
-# Performance Rules (Hot Path)
+## Performance Rules (Hot Path)
 
 Hot path includes:
 
@@ -146,7 +151,7 @@ If unsure whether your change touches hot path — assume it does and benchmark.
 
 ---
 
-# Benchmarks & Profiling
+## Benchmarks & Profiling
 
 For performance-sensitive PRs include:
 
@@ -159,7 +164,7 @@ For performance-sensitive PRs include:
 
 ---
 
-# Pull Request Process
+## Pull Request Process
 
 - Fork and create a feature branch
 - Keep PRs small and focused
@@ -176,9 +181,17 @@ PR description should include:
 
 Large refactors require opening an issue first.
 
+Before you open a PR, make sure that `make lint test-race` pass, the code is `gofmt`-ed and `go mod tidy` doesn't
+change `go.mod`/`go.sum` — CI checks all of them. Add an entry to `CHANGELOG.md` under **Unreleased**.
+
+Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/): `type(scope): short description`,
+where type is `feat`, `fix`, `perf`, `docs`, `refactor`, `test`, `ci` or `chore`.
+
+PRs that only change documentation skip the code jobs of CI; the `CI Result` check is the one required for merging.
+
 ---
 
-# Architecture Changes
+## Architecture Changes
 
 For changes affecting:
 
@@ -197,7 +210,7 @@ You must:
 
 ---
 
-# Metrics & Observability
+## Metrics & Observability
 
 If adding metrics:
 
@@ -211,7 +224,7 @@ If adding metrics:
 
 ---
 
-# Testing Requirements
+## Testing Requirements
 
 All PRs must include:
 
@@ -222,7 +235,7 @@ All PRs must include:
 
 ---
 
-# Bug Reports
+## Bug Reports
 
 Please include:
 
@@ -234,7 +247,7 @@ Please include:
 
 ---
 
-# Feature Requests
+## Feature Requests
 
 Open an issue describing:
 
@@ -245,13 +258,32 @@ Open an issue describing:
 
 ---
 
-# What Will Likely Be Rejected
+## What Will Likely Be Rejected
 
 - Performance regressions without measurement
 - Large PRs without prior discussion
 - Allocation-heavy abstractions in hot path
 - Breaking config changes without migration notes
 - Protocol changes without tests
+
+---
+
+## Releases
+
+Releases are made by maintainers. Pushing a `vX.Y.Z` tag runs the [release workflow](.github/workflows/release.yml), which:
+
+- runs the unit tests;
+- builds linux/amd64 and linux/arm64 binaries and attaches them with `checksums.txt` to a GitHub release;
+- pushes a multi-arch image to `ghcr.io/tentens-tech/gomcrouter:vX.Y.Z` (and `:latest` for non-prerelease tags).
+
+```bash
+make release-tag TAG=vX.Y.Z
+```
+
+Tags with a suffix, such as `v1.4.0-rc.1`, are published as prereleases. The workflow can also be started manually
+from the Actions tab for an existing tag; `force` replaces an existing release.
+
+Move the **Unreleased** section of `CHANGELOG.md` under the new version before tagging.
 
 ---
 

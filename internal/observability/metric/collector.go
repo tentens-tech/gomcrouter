@@ -95,7 +95,7 @@ func newCollector() *collector {
 			prometheus.CounterOpts{
 				Namespace: Namespace,
 				Name:      UpstreamErrorsTotalMetric,
-				Help:      "Total number of errors retuned from upstream instances",
+				Help:      "Total number of errors returned from upstream instances",
 			},
 			[]string{"cmd", "host"},
 		),

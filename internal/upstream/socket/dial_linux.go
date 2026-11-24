@@ -2,7 +2,11 @@
 
 package socket
 
-import "golang.org/x/sys/unix"
+import (
+	"errors"
+
+	"golang.org/x/sys/unix"
+)
 
 func dialFD(addr string, timeoutMs int) (fd int, err error) {
 	sa, family, err := sockAddrFromAddrPort(addr)
@@ -25,7 +29,7 @@ func dialFD(addr string, timeoutMs int) (fd int, err error) {
 		return fd, nil
 	}
 
-	if err == unix.EINPROGRESS || err == unix.EALREADY {
+	if errors.Is(err, unix.EINPROGRESS) || errors.Is(err, unix.EALREADY) {
 		if err = waitConnect(fd, timeoutMs); err != nil {
 			_ = unix.Close(fd)
 			return 0, err

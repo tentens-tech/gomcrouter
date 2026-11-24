@@ -74,7 +74,7 @@ func (s *Server) OnTraffic(c gnet.Conn) (action gnet.Action) {
 
 		_, _ = c.Discard(n)
 
-		req := pool.RequestPool.Get().(*types.Request)
+		req := pool.RequestPool.Get().(*types.Request) //nolint:errcheck // the pool only holds *types.Request
 		req.Raw = reqByteBuf
 		req.Cmd = cmd
 		req.Conn = c

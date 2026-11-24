@@ -21,11 +21,12 @@ const (
 
 func NewRootCmd() *cobra.Command {
 	rootCmd := cobra.Command{
-		Use:   RootCmdName,
-		Short: RootCmdName,
-		RunE:  rootCmdDef,
+		Use:     RootCmdName,
+		Short:   "High-performance memcached router",
+		Version: version.Version,
+		RunE:    rootCmdDef,
 	}
-	rootCmd.PersistentFlags().StringP("log-level", "", "info", "loglevel (default: info)")
+	rootCmd.PersistentFlags().StringP("log-level", "", "info", "log level")
 	rootCmd.PersistentFlags().StringP("router-config", "f", "router.yaml", "router config file path")
 	rootCmd.PersistentFlags().StringP("listen", "l", "tcp://:8080", "router listen")
 	rootCmd.PersistentFlags().StringP("metrics-listen-addr", "L", ":9090", "metrics listen address")
@@ -34,7 +35,7 @@ func NewRootCmd() *cobra.Command {
 	rootCmd.PersistentFlags().Int64P("timeout-ms", "r", 1000, "timeout milliseconds")
 	rootCmd.PersistentFlags().IntP("server-event-loops", "n", 1, "number of server event loops")
 	rootCmd.PersistentFlags().DurationP("dns-cache-ttl", "t", time.Second*30, "dns cache ttl")
-	rootCmd.PersistentFlags().IntP("buffer-size", "b", 1024*1024, "upstream socket r/w buffer sizes. (default: 1 mb)")
+	rootCmd.PersistentFlags().IntP("buffer-size", "b", 1024*1024, "upstream socket read/write buffer size in bytes")
 	return &rootCmd
 }
 

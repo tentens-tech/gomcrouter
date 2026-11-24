@@ -60,27 +60,27 @@ func newBufferPool() *bufferPool {
 func (p *bufferPool) Get(size int) *types.ByteBuf {
 	switch {
 	case size <= XSmallBufferSize:
-		bb := p.xs.Get().(*types.ByteBuf)
+		bb := p.xs.Get().(*types.ByteBuf) //nolint:errcheck // the pool only holds *types.ByteBuf
 		bb.B = bb.B[:size]
 		return bb
 	case size <= SmallBufferSize:
-		bb := p.s.Get().(*types.ByteBuf)
+		bb := p.s.Get().(*types.ByteBuf) //nolint:errcheck // the pool only holds *types.ByteBuf
 		bb.B = bb.B[:size]
 		return bb
 	case size <= MediumBufferSize:
-		bb := p.m.Get().(*types.ByteBuf)
+		bb := p.m.Get().(*types.ByteBuf) //nolint:errcheck // the pool only holds *types.ByteBuf
 		bb.B = bb.B[:size]
 		return bb
 	case size <= LargeBufferSize:
-		bb := p.l.Get().(*types.ByteBuf)
+		bb := p.l.Get().(*types.ByteBuf) //nolint:errcheck // the pool only holds *types.ByteBuf
 		bb.B = bb.B[:size]
 		return bb
 	case size <= XLargeBufferSize:
-		bb := p.xl.Get().(*types.ByteBuf)
+		bb := p.xl.Get().(*types.ByteBuf) //nolint:errcheck // the pool only holds *types.ByteBuf
 		bb.B = bb.B[:size]
 		return bb
 	case size <= XXLargeBufferSize:
-		bb := p.xxl.Get().(*types.ByteBuf)
+		bb := p.xxl.Get().(*types.ByteBuf) //nolint:errcheck // the pool only holds *types.ByteBuf
 		bb.B = bb.B[:size]
 		return bb
 	default:

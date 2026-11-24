@@ -1,6 +1,10 @@
-# CODEOWNERS file for tentens-tech/gomcrouter
-# Specify GitHub usernames or teams responsible for code in this repository.
+# CODEOWNERS file
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# The last matching pattern takes precedence, so every line lists all the owners of its paths.
 
-* @slucheninov
-* @yuriizheliezko
-*.go @artem-tsegelnyk
+# Default owners for everything in the repo
+* @slucheninov @yuriizheliezko
+
+# Go code
+*.go @slucheninov @yuriizheliezko @artem-tsegelnyk

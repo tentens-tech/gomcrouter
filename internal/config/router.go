@@ -29,7 +29,7 @@ type RouteConfig struct {
 }
 
 func ParseRouterConfig(path string) (*Router, error) {
-	file, err := os.Open(path)
+	file, err := os.Open(path) // #nosec G304 -- the path is the config file set by the operator
 	if err != nil {
 		return nil, err
 	}

@@ -1,0 +1,10 @@
+# Build outputs and local files that aren't needed to build the image.
+gomcrouter
+bin/
+dist/
+coverage.out
+junit.xml
+.idea/
+.vscode/
+examples/
+docs/
