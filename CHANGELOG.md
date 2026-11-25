@@ -7,6 +7,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ## Unreleased
 
+---
+
+## v1.4.1 — 2026-11-25
+
 ### Fixed
 
 - Replies to pipelined requests could come back out of order, so a client could get the value of another key: requests
