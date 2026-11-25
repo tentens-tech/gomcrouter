@@ -103,6 +103,11 @@ func (s *Socket) FD() int {
 	return s.fd
 }
 
+// BufferSize is the capacity of each of the read and write buffers.
+func (s *Socket) BufferSize() int {
+	return len(s.writeBuffer)
+}
+
 func (s *Socket) WantWrite() bool {
 	return s.wantWrite
 }

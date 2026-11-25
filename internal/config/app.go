@@ -72,7 +72,11 @@ func createLogger(appConfig *App) (*zap.SugaredLogger, error) {
 		return nil, err
 	}
 
-	logger, err := zap.NewProduction(zap.WithCaller(false), zap.IncreaseLevel(level))
+	// the production config starts at info: set the level explicitly so that
+	// debug works too (zap.IncreaseLevel can only raise it)
+	cfg := zap.NewProductionConfig()
+	cfg.Level = zap.NewAtomicLevelAt(level)
+	logger, err := cfg.Build(zap.WithCaller(false))
 	if err != nil {
 		return nil, err
 	}

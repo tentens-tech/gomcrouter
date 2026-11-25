@@ -293,7 +293,7 @@ see [SECURITY.md](SECURITY.md).
 make help       # list the targets
 make test-race  # unit tests with the race detector
 make lint       # golangci-lint
-make e2e        # docker-compose example and its end-to-end test
+make e2e        # end-to-end suites in docker, see test/README.md
 ```
 
 ---

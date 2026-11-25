@@ -193,10 +193,12 @@ func DecodeRequest(buf []byte) ([]byte, int, int, error) {
 		return nil, 0, 0, errors.ErrMalformedRequest
 	}
 
-	total := idx + bodyLen + 4
-	if total > len(buf) {
+	// compare without computing idx+bodyLen+4 first: a declared length close
+	// to MaxInt would overflow it to a negative value and panic in buf[:total].
+	if bodyLen > len(buf)-idx-4 {
 		return nil, 0, 0, nil
 	}
+	total := idx + bodyLen + 4
 
 	return buf[:total], cmd, total, nil
 }
@@ -253,9 +255,9 @@ func DecodeResponse(resp []byte) (int, error) {
 	header := resp[:iCRLF+2]
 	if !bytes.HasPrefix(header, ValueMarker) {
 		if bytes.HasPrefix(header, StatMarker) || bytes.HasPrefix(header, ItemMarker) {
-			n, err := decodeStats(resp[offset:])
-			if err != nil {
-				return 0, err
+			n := decodeStats(resp[offset:])
+			if n == 0 {
+				return 0, nil
 			}
 
 			offset += n
@@ -266,10 +268,14 @@ func DecodeResponse(resp []byte) (int, error) {
 
 	for {
 		bodyLen := decodeBodyLen(header, 4)
-		offset += bodyLen + 2
-		if offset > len(resp) {
+		if bodyLen < 0 {
+			return 0, errors.ErrMalformedResponse
+		}
+		// overflow-safe form of offset+bodyLen+2 > len(resp)
+		if bodyLen > len(resp)-offset-2 {
 			return 0, nil
 		}
+		offset += bodyLen + 2
 
 		nextICRLF := fastIndexCRLF(resp[offset:])
 		if nextICRLF == -1 {
@@ -290,22 +296,22 @@ func DecodeResponse(resp []byte) (int, error) {
 	return offset, nil
 }
 
-func decodeStats(b []byte) (int, error) {
+// decodeStats returns the length of the STAT/ITEM lines up to and including
+// the END line, or 0 if the END line has not been received yet. b may hold
+// further pipelined responses after END.
+func decodeStats(b []byte) int {
 	offset := 0
 
 	for {
 		iCRLF := fastIndexCRLF(b[offset:])
 		if iCRLF == -1 {
-			return 0, errors.ErrMalformedResponse
+			return 0
 		}
 
-		if bytes.Equal(b[offset:], EndResponse) {
-			offset += iCRLF + 2
-			break
-		}
-
+		line := b[offset : offset+iCRLF+2]
 		offset += iCRLF + 2
+		if bytes.Equal(line, EndResponse) {
+			return offset
+		}
 	}
-
-	return offset, nil
 }

@@ -7,4 +7,5 @@ junit.xml
 .idea/
 .vscode/
 examples/
+test/
 docs/

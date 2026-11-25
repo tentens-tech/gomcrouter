@@ -5,7 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/tentens-tech/gomcrouter/internal/config"
+	"github.com/tentens-tech/gomcrouter/internal/upstream/internal/upstreamtest"
 	"go.uber.org/zap"
 )
 
@@ -35,10 +39,9 @@ func (h *fakeHost) GoUnhealthy() {
 }
 
 func mkPoolWithState(healthyIDs []int, unhealthyIDs []int) (*OrderedPool, map[int]*fakeHost) {
-	logger, _ := zap.NewProduction()
 	p := &OrderedPool{
 		ctx: &config.AppContext{
-			Logger: logger.Sugar(),
+			Logger: zap.NewNop().Sugar(),
 		},
 	}
 
@@ -160,4 +163,98 @@ func TestOrderedPool_FakeHosts_OrderFull(t *testing.T) {
 
 	assertNums(t, p.healthyHosts, []int{0, 1, 2, 4, 5})
 	assertNums(t, p.unhealthyHosts, []int{})
+}
+
+func viewNums(t *testing.T, view []AsyncDoer) []int {
+	t.Helper()
+	out := make([]int, 0, len(view))
+	for _, d := range view {
+		oh, ok := d.(*OrderedHost)
+		require.True(t, ok)
+		out = append(out, oh.num)
+	}
+	return out
+}
+
+func healthyHostsGauge(t *testing.T) float64 {
+	t.Helper()
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	require.NoError(t, err)
+	for _, mf := range mfs {
+		if mf.GetName() == "gomcrouter_upstream_healthy_hosts_total" {
+			require.Len(t, mf.GetMetric(), 1)
+			return mf.GetMetric()[0].GetGauge().GetValue()
+		}
+	}
+	require.FailNow(t, "healthy hosts gauge not found")
+	return 0
+}
+
+func TestOrderedPool_WithRealHosts(t *testing.T) {
+	srv0 := upstreamtest.NewServer(t)
+	srv1 := upstreamtest.NewServer(t)
+	srv2 := upstreamtest.NewServer(t)
+	srv1.Stop() // down at start-up
+
+	e := newEnv(t)
+	p := NewOrderedPool(e.ctx, config.OrderedPoolConfig{srv0.Addr(), srv1.Addr(), srv2.Addr()}, e.eng)
+	hosts := map[int]*Host{}
+	for _, oh := range append(append([]*OrderedHost(nil), p.healthyHosts...), p.unhealthyHosts...) {
+		hosts[oh.num] = oh.Host
+		stopHost(t, e.cancel, oh.Host)
+	}
+	require.Len(t, hosts, 3)
+
+	assert.Equal(t, []int{0, 2}, viewNums(t, p.All()))
+	assertNums(t, p.unhealthyHosts, []int{1})
+	p.scrapeNumHealthyHostsMetric()
+	assert.InDelta(t, 2, healthyHostsGauge(t), 0)
+
+	// host 1 comes up: it is inserted in config order
+	srv1.Restart()
+	hosts[1].healthCheck()
+	assert.Equal(t, []int{0, 1, 2}, viewNums(t, p.All()))
+	assert.Empty(t, p.unhealthyHosts)
+
+	// host 0 goes down
+	srv0.Stop()
+	hosts[0].healthCheck()
+	assert.Equal(t, []int{1, 2}, viewNums(t, p.All()))
+	p.scrapeNumHealthyHostsMetric()
+	assert.InDelta(t, 2, healthyHostsGauge(t), 0)
+
+	// everything down
+	srv1.Stop()
+	srv2.Stop()
+	hosts[1].healthCheck()
+	hosts[2].healthCheck()
+	assert.Nil(t, p.All())
+	p.scrapeNumHealthyHostsMetric()
+	assert.InDelta(t, 0, healthyHostsGauge(t), 0)
+
+	// the view handed out before a transition is a stable snapshot
+	srv2.Restart()
+	before := p.All()
+	hosts[2].healthCheck()
+	assert.Nil(t, before)
+	assert.Equal(t, []int{2}, viewNums(t, p.All()))
+}
+
+func TestOrderedPool_Empty(t *testing.T) {
+	e := newEnv(t)
+	p := NewOrderedPool(e.ctx, config.OrderedPoolConfig{}, e.eng)
+	assert.Nil(t, p.All())
+}
+
+func TestOrderedPool_UnknownOrDuplicateTransitions(t *testing.T) {
+	p, hosts := mkPoolWithState([]int{0, 2}, []int{1})
+
+	// already healthy / already unhealthy / unknown ids are ignored
+	hosts[0].GoHealthy()
+	hosts[1].GoUnhealthy()
+	p.onHostHealthy(42)
+	p.onHostUnhealthy(42)
+
+	assertNums(t, p.healthyHosts, []int{0, 2})
+	assertNums(t, p.unhealthyHosts, []int{1})
 }

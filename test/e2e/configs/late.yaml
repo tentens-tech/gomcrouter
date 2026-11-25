@@ -1,0 +1,6 @@
+# memcache-late does not exist when the router starts
+orderedPool:
+  - memcache-late:11211
+
+route:
+  type: DefaultRoute

@@ -53,6 +53,12 @@ func (e *Engine) Stop() {
 	_ = e.poller.Wakeup()
 }
 
+// Close releases the poller. Call it only after the event loop has returned
+// and no host uses the engine.
+func (e *Engine) Close() {
+	e.poller.Close()
+}
+
 func (e *Engine) EnrollHost(addr string, hostId int, onFailureHook func()) (*PollGroup, error) {
 	pg, err := newPollGroup(
 		addr,
@@ -74,15 +80,16 @@ func (e *Engine) EnrollHost(addr string, hostId int, onFailureHook func()) (*Pol
 }
 
 func (e *Engine) DisenrollHost(pg *PollGroup) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	// match by identity: several pollgroups may share an address
 	for i, epg := range e.pollGroups {
-		if epg.addr == pg.addr {
-			e.mu.Lock()
+		if epg == pg {
 			e.pollGroups = append(e.pollGroups[:i], e.pollGroups[i+1:]...)
-			e.mu.Unlock()
 			return
 		}
 	}
-
 }
 
 func (e *Engine) Wakeup() {
@@ -96,15 +103,26 @@ func (e *Engine) eventLoop() {
 	runtime.LockOSThread()
 	e.ctx.Logger.Info("starting upstream engine event loop")
 	for e.open.Load() {
+		sleepMsec := -1
 		for i := 0; i < len(e.pollGroups); i++ {
-			if !e.pollGroups[i].IsActive() {
+			// dispatch may disenroll the pollgroup (failure hooks), which
+			// shifts e.pollGroups: keep using the same group
+			pg := e.pollGroups[i]
+			if !pg.IsActive() {
 				continue
 			}
 
-			e.pollGroups[i].dispatch()
+			pg.dispatch()
+		}
+		// the caps are computed after every group dispatched, so the time
+		// spent dispatching doesn't delay an earlier group's deadline
+		for _, pg := range e.pollGroups {
+			if pg.IsActive() {
+				sleepMsec = pg.capSleep(sleepMsec)
+			}
 		}
 
-		err := e.poller.Poll()
+		err := e.poller.Poll(sleepMsec)
 		if err != nil {
 			e.onPollerFailure(err)
 		}
@@ -122,7 +140,13 @@ func (e *Engine) recreatePoller() {
 		return
 	}
 
-	for _, pg := range e.pollGroups {
+	// iterate over a copy: failure hooks disenroll their pollgroup, which
+	// shifts e.pollGroups and would skip groups while ranging over it.
+	e.mu.Lock()
+	pollGroups := append([]*PollGroup(nil), e.pollGroups...)
+	e.mu.Unlock()
+
+	for _, pg := range pollGroups {
 		pg.onFailureHook()
 	}
 

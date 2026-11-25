@@ -1,0 +1,7 @@
+# DefaultRoute: every command goes to the first healthy host
+orderedPool:
+  - memcache1:11211
+  - memcache2:11211
+
+route:
+  type: DefaultRoute

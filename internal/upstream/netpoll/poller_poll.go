@@ -105,8 +105,16 @@ func (p *Poller) Delete(fd int) {
 	}
 }
 
-func (p *Poller) Poll() error {
-	n, err := unix.Poll(p.pfds, p.nextSleepMsec)
+// Poll waits for events and runs the registered callbacks. maxSleepMsec caps
+// how long it may block (negative means no cap), so callers can wake up in
+// time for their own deadlines.
+func (p *Poller) Poll(maxSleepMsec int) error {
+	sleepMsec := p.nextSleepMsec
+	if maxSleepMsec >= 0 && (sleepMsec < 0 || sleepMsec > maxSleepMsec) {
+		sleepMsec = maxSleepMsec
+	}
+
+	n, err := unix.Poll(p.pfds, sleepMsec)
 	if n == 0 || err == unix.EINTR {
 		atomic.StoreInt32(&p.wakeupCall, 0)
 		p.nextSleepMsec = -1
@@ -142,7 +150,10 @@ func (p *Poller) Poll() error {
 			pa.onR(pa.sock)
 		}
 
-		if re&unix.POLLOUT != 0 {
+		// the read callback may have replaced the socket (Delete, then a
+		// new Register that can reuse the descriptor): never flush the
+		// old socket's buffer after that
+		if re&unix.POLLOUT != 0 && i < len(p.attachments) && p.attachments[i] == pa {
 			pa.onW(pa.sock)
 		}
 	}

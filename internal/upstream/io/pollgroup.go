@@ -26,6 +26,16 @@ var (
 	ErrClosed  = errors.New("pollgroup is closed")
 
 	ErrClosedByClient = errors.New("pollgroup was closed by client")
+
+	// ErrConnectionClosed is reported when the poller signals a hangup or an
+	// error on a socket that carries no pending SO_ERROR (e.g. the peer closed
+	// the connection, which macOS reports as POLLHUP).
+	ErrConnectionClosed = errors.New("connection closed")
+
+	// ErrRequestTooLarge and ErrResponseTooLarge are reported for messages
+	// that do not fit into the socket buffers (see the buffer-size flag).
+	ErrRequestTooLarge  = errors.New("request does not fit into the socket buffer")
+	ErrResponseTooLarge = errors.New("response does not fit into the socket buffer")
 )
 
 type PollGroup struct {
@@ -125,14 +135,16 @@ func (p *PollGroup) NumSockets() int {
 
 func (p *PollGroup) Enqueue(req *types.Request) bool {
 	if !p.active.Load() {
-		req.Callback(nil, ErrClosed)
+		// the metric first: the callback may return the request to its pool
 		metric.Collector.HandleUpstreamError(req.Cmd, p.hostId)
+		req.Callback(nil, ErrClosed)
 		return false
 	}
 
 	if !p.requestRing.Push(req) {
-		req.Callback(nil, ErrBusy)
+		// the metric first: the callback may return the request to its pool
 		metric.Collector.HandleUpstreamError(req.Cmd, p.hostId)
+		req.Callback(nil, ErrBusy)
 		return false
 	}
 
@@ -147,8 +159,9 @@ func (p *PollGroup) expireInflightRequest(r *types.InflightRequest) {
 	// request was not seen in onReadable(). can't be safely returned to pool.
 	if r.Status == types.InflightRequestStatus {
 		r.Status = types.CancelledRequestStatus
-		r.Request.Callback(nil, ErrTimeout)
+		// the metric first: the callback may return the request to its pool
 		metric.Collector.HandleUpstreamError(r.Request.Cmd, p.hostId)
+		r.Request.Callback(nil, ErrTimeout)
 		return
 	}
 
@@ -172,9 +185,31 @@ func (p *PollGroup) dispatch() {
 	}
 }
 
+// capSleep lowers msec (the event loop's poll sleep, -1 meaning infinite) so
+// that the loop wakes up no later than the earliest pending request deadline
+// and can expire it even when no socket event arrives.
+func (p *PollGroup) capSleep(msec int) int {
+	ts, ok := p.timeoutHeap.PeekTS()
+	if !ok {
+		return msec
+	}
+
+	untilMsec := (ts - time.NanoTime() + 999_999) / 1_000_000 // round up
+	if untilMsec < 0 {
+		untilMsec = 0
+	}
+	if msec < 0 || untilMsec < int64(msec) {
+		return int(untilMsec)
+	}
+	return msec
+}
+
 func (p *PollGroup) dispatchOnSocket(s *socket.Socket) {
 	now := time.NanoTime()
-	for i := 0; i < SocketIOBatch; i++ {
+	// i counts the requests written: rejected oversized requests don't use the
+	// batch, so a run of them can't leave the next requests waiting for a
+	// wakeup that never comes
+	for i := 0; i < SocketIOBatch; {
 		if !s.CanPushToInflight() {
 			return
 		}
@@ -187,6 +222,14 @@ func (p *PollGroup) dispatchOnSocket(s *socket.Socket) {
 		}
 
 		if !s.Write(req.Raw.B) {
+			if len(req.Raw.B) > s.BufferSize() {
+				// can never be written: fail it instead of blocking the ring
+				_ = p.requestRing.Discard()
+				// the metric first: the callback may return the request to its pool
+				metric.Collector.HandleUpstreamError(req.Cmd, p.hostId)
+				req.Callback(nil, ErrRequestTooLarge)
+				continue
+			}
 			return
 		}
 
@@ -199,6 +242,7 @@ func (p *PollGroup) dispatchOnSocket(s *socket.Socket) {
 		s.PushToInflight(in)
 
 		p.timeoutHeap.Push(now+p.ctx.Config.TimeoutNs, in)
+		i++
 	}
 }
 
@@ -226,6 +270,12 @@ func (p *PollGroup) onReadable(s *socket.Socket) {
 			return
 		}
 		if n == 0 {
+			if offset == 0 && len(b) == s.BufferSize() {
+				// a full buffer without a complete response would never make
+				// progress (and keeps the socket readable: busy loop)
+				p.recreateSocket(s, ErrResponseTooLarge)
+				return
+			}
 			break
 		}
 
@@ -267,7 +317,13 @@ func (p *PollGroup) onReadable(s *socket.Socket) {
 }
 
 func (p *PollGroup) onSocketErr(s *socket.Socket) {
-	p.recreateSocket(s, getSocketError(s.FD()))
+	err := getSocketError(s.FD())
+	if err == nil {
+		// never fail inflight requests with a nil error: callbacks would get
+		// (nil, nil) and dereference the nil response.
+		err = ErrConnectionClosed
+	}
+	p.recreateSocket(s, err)
 }
 
 func (p *PollGroup) recreateSocket(s *socket.Socket, err error) {
@@ -307,8 +363,9 @@ func (p *PollGroup) drainPollGroup(err error) {
 			break
 		}
 
-		req.Callback(nil, errors.Wrap(err, "poll group was closed"))
+		// the metric first: the callback may return the request to its pool
 		metric.Collector.HandleUpstreamError(req.Cmd, p.hostId)
+		req.Callback(nil, errors.Wrap(err, "poll group was closed"))
 	}
 
 	p.sockets = nil
@@ -327,8 +384,9 @@ func (p *PollGroup) drainSocketWithErr(s *socket.Socket, err error) {
 		}
 
 		inflightReq.Status = types.DoneRequestStatus
-		inflightReq.Request.Callback(nil, errors.Wrap(err, "socket was closed"))
+		// the metric first: the callback may return the request to its pool
 		metric.Collector.HandleUpstreamError(inflightReq.Request.Cmd, p.hostId)
+		inflightReq.Request.Callback(nil, errors.Wrap(err, "socket was closed"))
 	}
 
 	p.poller.Delete(s.FD())

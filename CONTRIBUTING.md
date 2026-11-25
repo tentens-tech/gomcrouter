@@ -107,9 +107,12 @@ make cover        # unit tests with coverage, writes coverage.out
 make lint         # golangci-lint
 make vuln         # govulncheck
 make sec          # gosec
-make e2e          # docker-compose example + examples/docker/test.sh
+make e2e          # end-to-end suites in docker (make e2e SUITES="routes failover")
+make example      # docker-compose example + examples/docker/test.sh
 make docker-build # build the image
 ```
+
+How the tests are organised and what each e2e suite covers: [test/README.md](test/README.md).
 
 Run benchmarks:
 

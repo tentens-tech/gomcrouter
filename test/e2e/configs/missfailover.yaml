@@ -1,0 +1,7 @@
+# MissFailoverRoute: the next host is tried on a miss or an error
+orderedPool:
+  - memcache1:11211
+  - memcache2:11211
+
+route:
+  type: MissFailoverRoute

@@ -21,16 +21,17 @@ type LocalRouteHandler struct {
 }
 
 func (a *LocalRouteHandler) Handle(req *types.Request) {
-	pool.BufferPool.Put(req.Raw)
-	pool.RequestPool.Put(req)
-
 	switch req.Cmd {
 	case ascii.VersionCmd:
 		respond.AsyncRespond(ascii.VersionBuf, req)
 	case ascii.QuitCmd:
 		// no response on quit command
-		return
+		respond.AsyncRespond(nil, req)
 	default:
 		respond.AsyncRespond(ascii.HandlerMismatchBuf, req)
 	}
+
+	// the request is read by AsyncRespond, return it to the pool only after
+	pool.BufferPool.Put(req.Raw)
+	pool.RequestPool.Put(req)
 }

@@ -1,0 +1,5 @@
+# No upstreams: every proxied command fails with "no healthy upstream"
+orderedPool: []
+
+route:
+  type: DefaultRoute

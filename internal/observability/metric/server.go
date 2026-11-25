@@ -26,25 +26,29 @@ type Server struct {
 	server *http.Server
 }
 
+// NewServer builds the metrics HTTP server. The http.Server is created here,
+// not in Listen, so that Stop (called from another goroutine) never races
+// with Listen nor dereferences a nil server when it runs first.
 func NewServer(ctx context.Context, listen string) *Server {
-	return &Server{
-		ctx:    ctx,
-		listen: listen,
-	}
-}
-
-func (s *Server) Listen() {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
 
-	s.server = &http.Server{
-		Addr:              s.listen,
-		Handler:           mux,
-		ReadHeaderTimeout: metricsReadHeaderTimeout,
-		WriteTimeout:      metricsWriteTimeout,
-		IdleTimeout:       metricsIdleTimeout,
+	return &Server{
+		ctx:    ctx,
+		listen: listen,
+		server: &http.Server{
+			Addr:              listen,
+			Handler:           mux,
+			ReadHeaderTimeout: metricsReadHeaderTimeout,
+			WriteTimeout:      metricsWriteTimeout,
+			IdleTimeout:       metricsIdleTimeout,
+		},
 	}
+}
 
+// Listen serves /metrics until Stop is called. It returns immediately if
+// Stop was already called.
+func (s *Server) Listen() {
 	if err := s.server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatal(err)
 	}

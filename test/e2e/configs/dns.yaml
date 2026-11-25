@@ -1,0 +1,6 @@
+# memcache-dns moves between containers, the router follows the DNS change
+orderedPool:
+  - memcache-dns:11211
+
+route:
+  type: DefaultRoute
