@@ -9,6 +9,19 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ---
 
+## v1.4.2 — 2026-11-27
+
+### Fixed
+
+- `LICENSE` had a word that differs from the Apache License 2.0 text, so pkg.go.dev didn't recognize the license and
+  hid the README and the documentation
+
+### Added
+
+- Package documentation for the `gomcrouter` command (shown on pkg.go.dev)
+
+---
+
 ## v1.4.1 — 2026-11-25
 
 ### Fixed
